@@ -13,6 +13,13 @@ public sealed partial class ReaderControl : UserControl
     private EpubReader? _epubReader;
     private bool _webViewReady;
 
+    public event EventHandler? SpineChanged;
+
+    public int CurrentSpineIndex { get; private set; } = -1;
+    public int SpineCount => _epubReader?.Book.Spine.Count ?? 0;
+    public bool CanGoPrev => CurrentSpineIndex > 0;
+    public bool CanGoNext => CurrentSpineIndex >= 0 && CurrentSpineIndex < SpineCount - 1;
+
     public ReaderControl()
     {
         InitializeComponent();
@@ -21,11 +28,13 @@ public sealed partial class ReaderControl : UserControl
     public async Task LoadBookAsync(EpubReader reader)
     {
         _epubReader = reader;
+        CurrentSpineIndex = -1;
         await EnsureWebViewReadyAsync();
         ShowSpineItem(0);
     }
 
-    public int SpineCount => _epubReader?.Book.Spine.Count ?? 0;
+    public void GoPrev() => ShowSpineItem(CurrentSpineIndex - 1);
+    public void GoNext() => ShowSpineItem(CurrentSpineIndex + 1);
 
     public void ShowSpineItem(int index)
     {
@@ -37,6 +46,9 @@ public sealed partial class ReaderControl : UserControl
         var url = $"{SchemeName}://{Authority}/{zipPath}";
         Debug.WriteLine($"[ReaderControl] Navigating to: {url}");
         WebView.CoreWebView2.Navigate(url);
+
+        CurrentSpineIndex = index;
+        SpineChanged?.Invoke(this, EventArgs.Empty);
     }
 
     private async Task EnsureWebViewReadyAsync()
@@ -123,6 +135,4 @@ public sealed partial class ReaderControl : UserControl
         return MimeTypes.FromExtension(Path.GetExtension(zipPath));
     }
 
-    private static Uri BuildEpubUri(string zipPath) =>
-        new($"{SchemeName}://{Authority}/{zipPath}");
 }

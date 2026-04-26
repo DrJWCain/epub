@@ -22,6 +22,38 @@
                 Click="OpenEpub_Click"
                 Icon="OpenFile"
                 Label="Open EPUB" />
+            <AppBarSeparator />
+            <AppBarButton
+                x:Name="PrevButton"
+                Click="Prev_Click"
+                Icon="Previous"
+                IsEnabled="False"
+                Label="Previous">
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Key="Left" />
+                    <KeyboardAccelerator Key="PageUp" />
+                </AppBarButton.KeyboardAccelerators>
+            </AppBarButton>
+            <AppBarElementContainer VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="ProgressLabel"
+                    Padding="8,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="—" />
+            </AppBarElementContainer>
+            <AppBarButton
+                x:Name="NextButton"
+                Click="Next_Click"
+                Icon="Next"
+                IsEnabled="False"
+                Label="Next">
+                <AppBarButton.KeyboardAccelerators>
+                    <KeyboardAccelerator Key="Right" />
+                    <KeyboardAccelerator Key="PageDown" />
+                    <KeyboardAccelerator Key="Space" />
+                </AppBarButton.KeyboardAccelerators>
+            </AppBarButton>
         </CommandBar>
 
         <Grid Grid.Row="1">

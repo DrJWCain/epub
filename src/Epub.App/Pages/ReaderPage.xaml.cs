@@ -10,6 +10,16 @@ public sealed partial class ReaderPage : Page
     public ReaderPage()
     {
         InitializeComponent();
+        ReaderControl.SpineChanged += (s, e) => UpdateNavState();
+    }
+
+    private void UpdateNavState()
+    {
+        PrevButton.IsEnabled = ReaderControl.CanGoPrev;
+        NextButton.IsEnabled = ReaderControl.CanGoNext;
+        ProgressLabel.Text = ReaderControl.SpineCount > 0
+            ? $"{ReaderControl.CurrentSpineIndex + 1} / {ReaderControl.SpineCount}"
+            : "—";
     }
 
     private async void OpenEpub_Click(object sender, RoutedEventArgs e)
@@ -29,4 +39,8 @@ public sealed partial class ReaderPage : Page
         ReaderControl.Visibility = Visibility.Visible;
         await ReaderControl.LoadBookAsync(reader);
     }
+
+    private void Prev_Click(object sender, RoutedEventArgs e) => ReaderControl.GoPrev();
+
+    private void Next_Click(object sender, RoutedEventArgs e) => ReaderControl.GoNext();
 }
