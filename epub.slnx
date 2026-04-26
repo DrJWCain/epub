@@ -1,0 +1,18 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/Epub.App/Epub.App.csproj">
+      <Platform Project="ARM64" />
+      <Deploy Solution="Debug|*" />
+    </Project>
+    <Project Path="src/Epub.Core/Epub.Core.csproj" />
+    <Project Path="src/Epub.Library/Epub.Library.csproj" />
+    <Project Path="src/Epub.Renderer/Epub.Renderer.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Epub.Core.Tests/Epub.Core.Tests.csproj" />
+    <Project Path="tests/Epub.Library.Tests/Epub.Library.Tests.csproj" />
+  </Folder>
+</Solution>
