@@ -8,7 +8,7 @@
     var GAP = SIDE_MARGIN * 2;   // column-gap absorbs the would-be padding without leaking
 
     var css = [
-        'html, body { width: 100%; height: 100%; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }',
+        'html, body { width: 100%; height: 100%; margin: 0 !important; padding: 0 !important; overflow: hidden !important; touch-action: manipulation; }',
         '#' + WRAPPER_ID + ' {',
         '  height: calc(100vh - ' + (TOP_MARGIN * 2) + 'px);',
         '  margin: ' + TOP_MARGIN + 'px ' + SIDE_MARGIN + 'px;',
@@ -100,6 +100,38 @@
                     e.preventDefault();
                 }
             });
+
+            // Tap-to-turn-page (touch + mouse). Left 40% = prev, right 40% = next, middle 20% inert.
+            // Uses pointerdown for touch (more reliable than click in WebView2) and click as a
+            // fallback for mouse. Suppress double-fire by checking event type — pointerdown handles
+            // touch/pen, click handles mouse.
+            function tryNavOnTap(e) {
+                // Don't hijack link clicks (footnotes, cross-refs).
+                var t = e.target;
+                while (t && t !== document.body) {
+                    if (t.tagName === 'A' && t.getAttribute('href')) return;
+                    t = t.parentElement;
+                }
+                // Don't hijack when the user is selecting text.
+                var sel = window.getSelection && window.getSelection();
+                if (sel && sel.toString().length > 0) return;
+
+                var x = e.clientX;
+                if (x === undefined && e.changedTouches && e.changedTouches[0]) x = e.changedTouches[0].clientX;
+                if (x === undefined) return;
+
+                var w = window.innerWidth;
+                if (x < w * 0.4) Reader.prevPage();
+                else if (x > w * 0.6) Reader.nextPage();
+            }
+            // pointerdown fires for touch and mouse; we restrict click to non-touch to avoid double-firing.
+            document.addEventListener('pointerdown', function (e) {
+                if (e.pointerType === 'touch' || e.pointerType === 'pen') tryNavOnTap(e);
+            }, true);
+            document.addEventListener('click', function (e) {
+                // mouseEvent.pointerType isn't on click; check sourceCapabilities or just always handle for mouse.
+                tryNavOnTap(e);
+            }, true);
         },
 
         recomputeAndShow: function () {
