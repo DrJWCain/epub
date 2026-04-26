@@ -6,13 +6,13 @@ namespace Epub_App;
 
 public partial class App : Application
 {
-    private Window? _window;
-
     public IHost Host { get; }
 
     public new static App Current => (App)Application.Current;
 
     public IServiceProvider Services => Host.Services;
+
+    public Window? MainWindow { get; private set; }
 
     public App()
     {
@@ -30,7 +30,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _window = new MainWindow();
-        _window.Activate();
+        MainWindow = new MainWindow();
+        MainWindow.Activate();
     }
 }
