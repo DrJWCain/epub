@@ -59,7 +59,7 @@ public sealed partial class ReaderControl : UserControl
         await WebView.CoreWebView2.ExecuteScriptAsync("window.Reader && window.Reader.prevPage()");
     }
 
-    public void ShowSpineItem(int index, bool startAtLastPage = false)
+    public void ShowSpineItem(int index, string? hashFragment = null)
     {
         if (_epubReader is null) return;
         if (index < 0 || index >= _epubReader.Book.Spine.Count) return;
@@ -67,7 +67,8 @@ public sealed partial class ReaderControl : UserControl
         var item = _epubReader.Book.Spine[index];
         var zipPath = _epubReader.ResolveHref(item.ManifestItem.Href);
         var url = $"{SchemeName}://{Authority}/{zipPath}";
-        if (startAtLastPage) url += "#__last_page";
+        if (!string.IsNullOrEmpty(hashFragment))
+            url += hashFragment.StartsWith('#') ? hashFragment : "#" + hashFragment;
         Debug.WriteLine($"[ReaderControl] Navigating to: {url}");
         WebView.CoreWebView2.Navigate(url);
 
@@ -75,6 +76,35 @@ public sealed partial class ReaderControl : UserControl
         CurrentPageInChapter = 0;
         ChapterPageCount = 1;
         SpineChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Navigate to a TOC href (already an absolute zip path from NavParser/NcxParser, may include #anchor).
+    /// Returns true if a matching spine item was found.
+    /// </summary>
+    public bool TryNavigateToHref(string absoluteHref)
+    {
+        if (_epubReader is null || string.IsNullOrEmpty(absoluteHref)) return false;
+
+        string pathPart = absoluteHref;
+        string? hashFragment = null;
+        var hashIdx = absoluteHref.IndexOf('#');
+        if (hashIdx >= 0)
+        {
+            pathPart = absoluteHref[..hashIdx];
+            hashFragment = absoluteHref[hashIdx..]; // includes the '#'
+        }
+
+        for (int i = 0; i < _epubReader.Book.Spine.Count; i++)
+        {
+            var spineResolved = _epubReader.ResolveHref(_epubReader.Book.Spine[i].ManifestItem.Href);
+            if (string.Equals(spineResolved, pathPart, StringComparison.Ordinal))
+            {
+                ShowSpineItem(i, hashFragment);
+                return true;
+            }
+        }
+        return false;
     }
 
     private async Task EnsureWebViewReadyAsync()
@@ -140,7 +170,7 @@ public sealed partial class ReaderControl : UserControl
                 case "startOfChapter":
                     Debug.WriteLine("[ReaderControl] startOfChapter — going back to previous spine item, last page");
                     if (CanGoPrevChapter)
-                        ShowSpineItem(CurrentSpineIndex - 1, startAtLastPage: true);
+                        ShowSpineItem(CurrentSpineIndex - 1, hashFragment: "#__last_page");
                     break;
             }
         }

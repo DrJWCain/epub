@@ -40,7 +40,8 @@ public class EpubReaderTests
         reader.Book.Toc.Should().NotBeNull();
         reader.Book.Toc!.Nodes.Should().HaveCount(2);
         reader.Book.Toc.Nodes[0].Title.Should().Be("Chapter 1");
-        reader.Book.Toc.Nodes[0].Href.Should().Be("ch01.xhtml");
+        // TocNode.Href is now an absolute zip path (resolved relative to nav.xhtml location).
+        reader.Book.Toc.Nodes[0].Href.Should().Be("OEBPS/ch01.xhtml");
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public class EpubReaderTests
         reader.Book.Toc.Should().NotBeNull();
         reader.Book.Toc!.Nodes.Should().ContainSingle()
             .Which.Title.Should().Be("Chapter 1");
-        reader.Book.Toc.Nodes[0].Href.Should().Be("ch01.html");
+        reader.Book.Toc.Nodes[0].Href.Should().Be("OEBPS/ch01.html");
     }
 
     [Fact]

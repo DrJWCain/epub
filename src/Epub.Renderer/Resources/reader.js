@@ -57,11 +57,23 @@
             }
             this.wrapper = wrapper;
 
+            // Wrapper must be positioned for descendant offsetLeft to be relative to it.
+            this.wrapper.style.position = 'relative';
+
+            // Snapshot the hash and strip it from the URL — otherwise the browser tries
+            // to scroll the anchored element into view, which shifts body.scrollLeft and
+            // throws our transform-based pagination out of alignment (cover/page margin loss).
+            var initialHash = window.location.hash;
+            if (initialHash) {
+                try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+            }
+
             // Suppress transition for the initial render so we don't see a slide-from-zero animation.
             this.wrapper.style.transition = 'none';
             this.recompute();
-            var initialPage = (window.location.hash === '#__last_page') ? this.pageCount - 1 : 0;
-            this.goToPage(initialPage);
+            this.goToPage(this.pageForInitialHash(initialHash));
+            // Make absolutely sure the browser hasn't shifted the document.
+            window.scrollTo(0, 0);
             // Restore transition after one frame (subsequent page-turns animate normally).
             var self = this;
             requestAnimationFrame(function () { self.wrapper.style.transition = ''; });
@@ -93,6 +105,28 @@
         recomputeAndShow: function () {
             this.recompute();
             this.goToPage(this.currentPage);
+        },
+
+        pageForInitialHash: function (hash) {
+            if (!hash || hash.length <= 1) return 0;
+            if (hash === '#__last_page') return this.pageCount - 1;
+            // Element-id anchor — find element, compute which page contains it.
+            try {
+                var id = decodeURIComponent(hash.substring(1));
+                var el = document.getElementById(id);
+                if (!el || !this.wrapper) return 0;
+
+                // getBoundingClientRect forces a layout flush so positions are fresh, then
+                // gives the element's viewport-x relative to wrapper's current viewport-x.
+                // (Wrapper has no transform applied yet — this runs in init before goToPage.)
+                var rect = el.getBoundingClientRect();
+                var wrect = this.wrapper.getBoundingClientRect();
+                var x = rect.left - wrect.left;
+                var stride = this.wrapper.clientWidth + GAP;
+                // Small tolerance for subpixel column-boundary rounding.
+                return Math.max(0, Math.min(Math.floor((x + 4) / stride), this.pageCount - 1));
+            } catch (e) { /* malformed hash */ }
+            return 0;
         },
 
         recompute: function () {

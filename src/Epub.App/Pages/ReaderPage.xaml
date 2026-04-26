@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:Epub_App.Pages"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:reader="using:Epub_Renderer"
     mc:Ignorable="d">
@@ -18,6 +19,13 @@
             Grid.Row="0"
             DefaultLabelPosition="Right"
             HorizontalAlignment="Left">
+            <AppBarToggleButton
+                x:Name="TocToggle"
+                Click="TocToggle_Click"
+                Icon="List"
+                IsEnabled="False"
+                Label="Contents" />
+            <AppBarSeparator />
             <AppBarButton
                 Click="OpenEpub_Click"
                 Icon="OpenFile"
@@ -56,14 +64,43 @@
             </AppBarButton>
         </CommandBar>
 
-        <Grid Grid.Row="1">
-            <reader:ReaderControl x:Name="ReaderControl" Visibility="Collapsed" />
-            <TextBlock
-                x:Name="EmptyState"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Style="{StaticResource SubtitleTextBlockStyle}"
-                Text="No book open. Click Open EPUB to load one." />
-        </Grid>
+        <SplitView
+            x:Name="TocSplitView"
+            Grid.Row="1"
+            DisplayMode="Overlay"
+            IsPaneOpen="False"
+            OpenPaneLength="320"
+            PanePlacement="Left">
+            <SplitView.Pane>
+                <Grid Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}">
+                    <ListView
+                        x:Name="TocList"
+                        IsItemClickEnabled="True"
+                        ItemClick="TocList_ItemClick"
+                        SelectionMode="Single">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="local:TocItem">
+                                <TextBlock
+                                    Margin="{x:Bind PaddingLeft}"
+                                    Text="{x:Bind Title}"
+                                    TextWrapping="Wrap" />
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </SplitView.Pane>
+
+            <SplitView.Content>
+                <Grid>
+                    <reader:ReaderControl x:Name="ReaderControl" Visibility="Collapsed" />
+                    <TextBlock
+                        x:Name="EmptyState"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource SubtitleTextBlockStyle}"
+                        Text="No book open. Click Open EPUB to load one." />
+                </Grid>
+            </SplitView.Content>
+        </SplitView>
     </Grid>
 </Page>

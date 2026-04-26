@@ -1,4 +1,5 @@
 using Epub.Core;
+using Epub.Core.Models;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Storage.Pickers;
@@ -39,9 +40,60 @@ public sealed partial class ReaderPage : Page
         EmptyState.Visibility = Visibility.Collapsed;
         ReaderControl.Visibility = Visibility.Visible;
         await ReaderControl.LoadBookAsync(reader);
+        LoadToc(reader.Book);
+    }
+
+    private void LoadToc(Book book)
+    {
+        var items = new List<TocItem>();
+        if (book.Toc is not null)
+            FlattenToc(book.Toc.Nodes, depth: 0, items);
+        TocList.ItemsSource = items;
+        TocToggle.IsEnabled = items.Count > 0;
+    }
+
+    private static void FlattenToc(IReadOnlyList<TocNode> nodes, int depth, List<TocItem> output)
+    {
+        foreach (var node in nodes)
+        {
+            output.Add(new TocItem(node.Title, node.Href, depth));
+            if (node.Children.Count > 0)
+                FlattenToc(node.Children, depth + 1, output);
+        }
+    }
+
+    private void TocToggle_Click(object sender, RoutedEventArgs e)
+    {
+        TocSplitView.IsPaneOpen = TocToggle.IsChecked == true;
+    }
+
+    private void TocList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is TocItem item && !string.IsNullOrEmpty(item.Href))
+        {
+            ReaderControl.TryNavigateToHref(item.Href);
+            TocSplitView.IsPaneOpen = false;
+            TocToggle.IsChecked = false;
+        }
     }
 
     private async void Prev_Click(object sender, RoutedEventArgs e) => await ReaderControl.GoBackAsync();
 
     private async void Next_Click(object sender, RoutedEventArgs e) => await ReaderControl.GoForwardAsync();
+}
+
+public sealed class TocItem
+{
+    public string Title { get; }
+    public string? Href { get; }
+    public int Depth { get; }
+    public Thickness PaddingLeft { get; }
+
+    public TocItem(string title, string? href, int depth)
+    {
+        Title = title;
+        Href = href;
+        Depth = depth;
+        PaddingLeft = new Thickness(Math.Min(depth, 4) * 16, 4, 8, 4);
+    }
 }

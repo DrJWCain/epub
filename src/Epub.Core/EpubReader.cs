@@ -122,7 +122,7 @@ public sealed class EpubReader : IDisposable
             if (navEntry is not null)
             {
                 using var navStream = navEntry.Open();
-                return NavParser.Parse(navStream);
+                return NavParser.Parse(navStream, ZipPathResolver.DirectoryOf(navPath));
             }
         }
 
@@ -133,7 +133,7 @@ public sealed class EpubReader : IDisposable
             if (ncxEntry is not null)
             {
                 using var ncxStream = ncxEntry.Open();
-                return NcxParser.Parse(ncxStream);
+                return NcxParser.Parse(ncxStream, ZipPathResolver.DirectoryOf(ncxPath));
             }
         }
 
