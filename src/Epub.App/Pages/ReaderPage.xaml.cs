@@ -1,42 +1,40 @@
 using Epub.Core;
 using Epub.Core.Models;
+using Epub_App.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using Windows.Storage.Pickers;
 
 namespace Epub_App.Pages;
 
 public sealed partial class ReaderPage : Page
 {
+    private readonly IBookSession _session;
+
     public ReaderPage()
     {
         InitializeComponent();
+        _session = App.Current.Services.GetRequiredService<IBookSession>();
         ReaderControl.PageChanged += (s, e) => UpdateNavState();
         ReaderControl.SpineChanged += (s, e) => UpdateNavState();
     }
 
-    private void UpdateNavState()
+    protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
-        PrevButton.IsEnabled = ReaderControl.CanGoBack;
-        NextButton.IsEnabled = ReaderControl.CanGoForward;
-        ProgressLabel.Text = ReaderControl.SpineCount > 0
-            ? $"Ch {ReaderControl.CurrentSpineIndex + 1} / {ReaderControl.SpineCount}  •  Page {ReaderControl.CurrentPageInChapter + 1} / {ReaderControl.ChapterPageCount}"
-            : "—";
+        base.OnNavigatedTo(e);
+        var path = _session.PendingBookPath;
+        if (!string.IsNullOrEmpty(path) && File.Exists(path))
+        {
+            _session.PendingBookPath = null; // consume
+            await OpenAsync(path);
+        }
     }
 
-    private async void OpenEpub_Click(object sender, RoutedEventArgs e)
+    private async Task OpenAsync(string path)
     {
-        var picker = new FileOpenPicker();
-        picker.FileTypeFilter.Add(".epub");
-        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
-
-        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.Current.MainWindow);
-        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
-
-        var file = await picker.PickSingleFileAsync();
-        if (file is null) return;
-
-        var reader = await EpubReader.OpenAsync(file.Path);
+        var reader = await EpubReader.OpenAsync(path);
         EmptyState.Visibility = Visibility.Collapsed;
         ReaderControl.Visibility = Visibility.Visible;
         await ReaderControl.LoadBookAsync(reader);
@@ -60,6 +58,30 @@ public sealed partial class ReaderPage : Page
             if (node.Children.Count > 0)
                 FlattenToc(node.Children, depth + 1, output);
         }
+    }
+
+    private void UpdateNavState()
+    {
+        PrevButton.IsEnabled = ReaderControl.CanGoBack;
+        NextButton.IsEnabled = ReaderControl.CanGoForward;
+        ProgressLabel.Text = ReaderControl.SpineCount > 0
+            ? $"Ch {ReaderControl.CurrentSpineIndex + 1} / {ReaderControl.SpineCount}  •  Page {ReaderControl.CurrentPageInChapter + 1} / {ReaderControl.ChapterPageCount}"
+            : "—";
+    }
+
+    private async void OpenEpub_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker();
+        picker.FileTypeFilter.Add(".epub");
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.Current.MainWindow);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+        var file = await picker.PickSingleFileAsync();
+        if (file is null) return;
+
+        await OpenAsync(file.Path);
     }
 
     private void TocToggle_Click(object sender, RoutedEventArgs e)

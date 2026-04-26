@@ -27,6 +27,8 @@ public partial class App : Application
     private static void ConfigureServices(IServiceCollection services)
     {
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<IBookSession, BookSession>();
+        services.AddSingleton<Epub.Library.ILibraryService, Epub.Library.LibraryService>();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

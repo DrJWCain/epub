@@ -130,6 +130,11 @@ internal static class OpfParser
         if (coverId is not null && manifestById.TryGetValue(coverId, out var coverById))
             return coverById.Href;
 
-        return null;
+        // Fallback for broken OPFs (e.g. Write Great Code v3 declares <meta name="cover" content="cover-image">
+        // but the actual cover image item has id="covera"): any image-typed manifest item whose id contains "cover".
+        var coverByIdFuzzy = manifest.FirstOrDefault(m =>
+            m.MediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            && m.Id.Contains("cover", StringComparison.OrdinalIgnoreCase));
+        return coverByIdFuzzy?.Href;
     }
 }

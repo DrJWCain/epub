@@ -8,12 +8,73 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="24">
+    <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Library" />
-        <TextBlock Grid.Row="1" Text="Library placeholder — will show book grid." />
+
+        <CommandBar
+            Grid.Row="0"
+            DefaultLabelPosition="Right"
+            HorizontalAlignment="Left">
+            <AppBarButton
+                x:Name="RefreshButton"
+                Click="Refresh_Click"
+                Icon="Refresh"
+                Label="Refresh" />
+            <AppBarElementContainer VerticalAlignment="Center">
+                <TextBlock
+                    x:Name="StatusLabel"
+                    Padding="8,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="" />
+            </AppBarElementContainer>
+        </CommandBar>
+
+        <Grid Grid.Row="1">
+            <GridView
+                x:Name="BookGrid"
+                Padding="24,16,24,16"
+                IsItemClickEnabled="True"
+                ItemClick="Book_Click"
+                SelectionMode="None">
+                <GridView.ItemTemplate>
+                    <DataTemplate x:DataType="local:LibraryGridItem">
+                        <StackPanel Width="160" Margin="0,0,0,16" Spacing="6">
+                            <Border
+                                Width="160"
+                                Height="220"
+                                Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}"
+                                CornerRadius="2">
+                                <Image Source="{x:Bind Cover}" Stretch="Uniform" />
+                            </Border>
+                            <TextBlock
+                                MaxLines="2"
+                                Style="{StaticResource BodyStrongTextBlockStyle}"
+                                Text="{x:Bind Title}"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                MaxLines="1"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                Foreground="{ThemeResource SystemControlForegroundBaseMediumBrush}"
+                                Text="{x:Bind Authors}"
+                                TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </DataTemplate>
+                </GridView.ItemTemplate>
+            </GridView>
+
+            <TextBlock
+                x:Name="EmptyState"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MaxWidth="500"
+                Style="{StaticResource SubtitleTextBlockStyle}"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+        </Grid>
     </Grid>
 </Page>

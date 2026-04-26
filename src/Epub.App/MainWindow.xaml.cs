@@ -51,4 +51,17 @@ public sealed partial class MainWindow : Window
             }
         }
     }
+
+    /// <summary>Switch the NavigationView to the Reader tab. Used by Library when the user clicks a book.</summary>
+    public void NavigateToReaderTab()
+    {
+        foreach (var item in NavView.MenuItems)
+        {
+            if (item is NavigationViewItem ni && string.Equals(ni.Tag?.ToString(), "reader", StringComparison.Ordinal))
+            {
+                NavView.SelectedItem = ni;
+                return;
+            }
+        }
+    }
 }
