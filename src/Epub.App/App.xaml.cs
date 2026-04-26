@@ -1,3 +1,4 @@
+using Epub_App.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.UI.Xaml;
@@ -25,7 +26,7 @@ public partial class App : Application
 
     private static void ConfigureServices(IServiceCollection services)
     {
-        // Service registrations land here as features come online.
+        services.AddSingleton<ISettingsService, SettingsService>();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

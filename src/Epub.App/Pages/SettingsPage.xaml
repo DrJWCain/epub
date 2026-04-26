@@ -8,12 +8,49 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid Padding="24,16,24,16" RowSpacing="24">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Settings" />
-        <TextBlock Grid.Row="1" Text="This is the Settings page" />
-    </Grid>
+    <ScrollViewer Padding="24,16,24,16">
+        <StackPanel Spacing="24" MaxWidth="700" HorizontalAlignment="Left">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Settings" />
+
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Library" />
+                <TextBlock
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="Folder containing your EPUB files. The library page will list every .epub it finds in this folder." />
+
+                <Border
+                    Padding="12"
+                    Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}"
+                    BorderBrush="{ThemeResource SystemControlBackgroundBaseLowBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock
+                            x:Name="FolderPathText"
+                            Grid.Column="0"
+                            VerticalAlignment="Center"
+                            FontFamily="Consolas"
+                            Text="(not set)"
+                            TextTrimming="CharacterEllipsis" />
+                        <Button
+                            x:Name="ChangeFolderButton"
+                            Grid.Column="1"
+                            Click="ChangeFolder_Click"
+                            Content="Change folder…" />
+                        <Button
+                            x:Name="ClearFolderButton"
+                            Grid.Column="2"
+                            Click="ClearFolder_Click"
+                            Content="Clear"
+                            IsEnabled="False" />
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
 </Page>
