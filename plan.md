@@ -1,5 +1,28 @@
 # WinUI 3 EPUB Reader — Build Plan
 
+## Status snapshot (2026-04-26)
+
+**7 of 8 MVP milestones complete.** App is genuinely usable: open it, see your 47 books as covers, tap one, page through with arrows / buttons / taps, jump around via TOC. Chapters flow seamlessly into each other. Tap-zones work on the Surface tablet.
+
+| | Milestone | Commit | Notes |
+|---|---|---|---|
+| ✅ | M0 — Bootstrap | `2e0ed38` | WinUI 3 NavigationView shell, ARM64-only, .NET 10, SLNX |
+| ✅ | M1 — EPUB parser | `55d386b` | 79→190 tests; works on all 47 real books |
+| ✅ | M2 — WebView2 render | `3355138` | Custom `epub://` scheme, in-place ZipArchive serving |
+| ✅ | M3 — Spine navigation | `61f347a` | Prev/next + chapter indicator + KB accelerators |
+| ✅ | M4 — Pagination | `a7033f7` | CSS columns, JS bridge, page-spanning prev/next, reading margins |
+| ✅ | M5 — TOC sidebar | `a60b46c` | SplitView + flat-list, anchor scrolling, nav-href fix |
+| ✅ | (Settings) | `f1440cc` | ApplicationData.LocalSettings + library folder picker |
+| ✅ | M6 — Library + cover grid | `14abda0` | Scans folder, GridView of cover tiles, click-to-read |
+| ✅ | (Tap-zones) | `8ec56dd` | Touch tap-to-turn-page (left 40% prev, right 40% next) |
+| ⏭️ | **M7 — Persistence** | — | **MVP closer**: SQLite for last-read position |
+| ⏳ | M8–M12 | — | Themes/typography, bookmarks/highlights, search, polish, MSIX packaging |
+
+**Open follow-ups (parked, not blockers):**
+- **Cover/title-page polish** — handful of books still render cover on page 2/2 (publisher CSS edge cases beyond the 60px slack). Tracked.
+- FluentAssertions 8 license warning on test runs (drop to AwesomeAssertions if it gets annoying)
+- `.gitattributes` for `* text=auto` to silence CRLF warnings
+
 ## 0. Decisions locked (2026-04-26)
 
 **Product / scope:**
@@ -13,7 +36,8 @@
 - `<Platforms>ARM64</Platforms>`, `<RuntimeIdentifier>win-arm64</RuntimeIdentifier>`
 
 **Engineering:**
-- IDE: Visual Studio Community 2026 (ships .NET 9 + Windows App SDK templates)
+- IDE: Visual Studio Community 2026
+- Runtime: **.NET 10** (10.0.201, ships with VS 2026), Windows App SDK 1.8
 - Solution format: **SLNX** (XML, cleaner git diffs)
 - Source control: local git, GitHub private remote (set up on request, not auto-pushed)
 - Location format v1: simple `{spineIndex, charOffset}` — design behind an `IBookLocation` interface so real EPUB CFI can be swapped in for v2
@@ -25,15 +49,15 @@
 
 | Concern | Choice | Why |
 |---|---|---|
-| Shell framework | **WinUI 3 / Windows App SDK 1.7+** | Native Windows 11 look, mica, snap layouts |
-| Language | **C# / .NET 9** | Ships with VS 2026, no extra SDK install |
+| Shell framework | **WinUI 3 / Windows App SDK 1.8** | Native Windows 11 look, mica, snap layouts |
+| Language | **C# / .NET 10** | Ships with VS 2026, no extra SDK install |
 | Reader pane | **WebView2** | Chromium handles all XHTML/CSS/JS that EPUB throws at it |
 | MVVM | **CommunityToolkit.Mvvm** | Source-generated boilerplate, no ceremony |
 | DI | **Microsoft.Extensions.DependencyInjection** | Standard, painless |
 | ZIP | **System.IO.Compression** | Built-in, sufficient |
 | XML | **System.Xml.Linq** | Built-in, OPF/nav are simple |
 | DB | **Microsoft.Data.Sqlite** | Lightweight, no server |
-| Tests | **xUnit + FluentAssertions** | Standard |
+| Tests | **xUnit + FluentAssertions** | (FA 8 license warns on every run — swap to AwesomeAssertions later if annoying) |
 | Packaging | **MSIX** (single-project, unpackaged dev mode initially) | Store-ready when needed |
 
 **Deliberately not using:** VersOne.Epub or other third-party EPUB libs — parser is small enough to own and you'll need to extend it for CFI/highlights anyway.
@@ -191,7 +215,7 @@ Parsing and library scans run on `Task.Run`. UI thread does only UI. Use `IAsync
 
 ## 6. Real-world content profile (from `C:\reading`)
 
-The target library is **19 technical books** from four publishers (snapshot 2026-04-26).
+The target library is **47 technical books** from four publishers (snapshot 2026-04-26 — grew from 8 to 47 during M0–M6 development).
 
 **Publisher templates encountered:**
 
@@ -212,20 +236,33 @@ The target library is **19 technical books** from four publishers (snapshot 2026
 
 **Implications added to milestones:**
 
-- **M2:** verify font MIME types (`font/otf`, `font/woff2`) in `EpubResourceHandler`. Test against No Starch annotation fonts.
-- **M4:** spike code-block handling early. Wide `<pre>` lines in narrow columns will overflow — pick from `overflow-x: auto`, force-wrap, or scaled font. Add `break-inside: avoid` to `<pre>` and `<aside>`. Lazy-paginate (current screen first, rest in background) to keep 200+ KB chapters responsive.
-- **M5:** nav-first TOC parser, NCX fallback only. Resolve all paths relative to the OPF base URL.
-- **M7:** consider exposing print-page markers as "print page N" indicator alongside reflow pagination.
-- **M8 (new):** detect Pearson-style image-based code (manifest signal: `graphics/` folder + many `f####-##.jpg` filenames + low text-to-image ratio). Surface a small notice on the reader chrome ("Code in this book is image-based; copy and search are limited") so users aren't confused when copy/search seem broken.
+- **M2 [done]:** font MIME types (`font/otf`, `font/woff2`) handled by `MimeTypes` fallback in resource handler. No Starch annotation fonts work.
+- **M4 [done]:** code-block strategy = `overflow-x: auto` on `<pre>`. `break-inside: avoid` set on `<pre>`, `<aside>`, `<figure>`, headings. Pagination is lazy via single layout pass.
+- **M5 [done with caveat]:** **TOC hrefs resolve against the nav.xhtml/NCX file's own zip directory, NOT the OPF's** — caught by Building a Debugger which has nav at `OEBPS/xhtml/nav.xhtml` with hrefs relative to that subdir.
+- **M8 (still pending):** detect Pearson-style image-based code (manifest signal: `graphics/` folder + many `f####-##.jpg` filenames + low text-to-image ratio). Surface a small notice on the reader chrome.
 
-## 7. Deferred past v1
+## 7. Real-world fixes that emerged during build
+
+These weren't in the original plan but real EPUBs forced them:
+
+- **Cover detection fallback** — Write Great Code v3 has a broken OPF (`<meta name="cover" content="cover-image"/>` but the actual image item has `id="covera"`). Added a third fallback: any image-typed manifest item whose id contains "cover".
+- **Figure-margin override for cover pages** — multiple publishers' `<figure>` rules (e.g., O'Reilly's `#sbo-rt-content figure { margin: 15px auto !important }` at specificity 1,1,1) push cover figures past column height, then `break-inside: avoid` punts them entirely to the next column. Override with `#__epub_reader_content[id] figure { margin: 0 !important }` (matching specificity, cascade later).
+- **Image height slack** — `img { max-height: calc(100vh - 48px - 60px) }` leaves 60px for ancestor wrapper margins (e.g. WGC v2's `<div class="cover">` with publisher CSS adding `.2em` margin).
+- **Reading margins via column-gap, not padding** — padding inside the wrapper made transform-stride mismatch column-stride, leaving content offset. Solution: `wrapper margin: 24px 48px; column-gap: 96px` (= 2× side margin), so the gap absorbs the visual padding without leaking next-page content.
+- **Anchor scrolling** — element offsets in column flow: use `getBoundingClientRect` (forces layout flush, more reliable than raw `offsetLeft`) with a 4 px subpixel tolerance. Strip URL hash with `history.replaceState` before init runs so the browser doesn't try its own anchor-scroll and shift `body.scrollLeft`.
+- **Touch tap-to-turn** — needs both `pointerdown` (touch/pen) and `click` (mouse) handlers; just `click` alone doesn't fire reliably for finger taps in WebView2-on-WinUI-3. `touch-action: manipulation` kills the legacy 300 ms tap delay.
+- **WebView2 background** — defaults to transparent, which on a mica window bleeds through as black. Set `DefaultBackgroundColor="White"` and `Profile.PreferredColorScheme = Light` so EPUB content with no explicit background renders correctly.
+
+## 8. Deferred past v1
 
 - LCP DRM (library books) — significant undertaking, separate phase
 - Cloud sync of positions/highlights
 - Read-aloud / SMIL media overlays
 - OPDS catalog browsing
 - AZW3/MOBI conversion (point users at Calibre)
+- Image-based-code detection notice (M8 polish)
+- Cover-page polish for remaining publisher edge cases
 
-## 7. First concrete step
+## 9. Next step
 
-Scaffold M0 — create the solution, projects, and the empty NavigationView shell. That's a single session and gives you something to run.
+**M7 — Persistence**: SQLite-backed last-read position per book, so reopening a book lands on the page you left. Plan budget 1 day. Closes the MVP.
