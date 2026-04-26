@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Reflection;
+using System.Text.Json;
 using Epub.Core;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.Web.WebView2.Core;
@@ -10,15 +12,23 @@ public sealed partial class ReaderControl : UserControl
     private const string SchemeName = "epub";
     private const string Authority = "book";
 
+    private static readonly string ReaderScript = LoadEmbeddedResource("Epub_Renderer.Resources.reader.js");
+
     private EpubReader? _epubReader;
     private bool _webViewReady;
 
     public event EventHandler? SpineChanged;
+    public event EventHandler? PageChanged;
 
     public int CurrentSpineIndex { get; private set; } = -1;
     public int SpineCount => _epubReader?.Book.Spine.Count ?? 0;
-    public bool CanGoPrev => CurrentSpineIndex > 0;
-    public bool CanGoNext => CurrentSpineIndex >= 0 && CurrentSpineIndex < SpineCount - 1;
+    public bool CanGoPrevChapter => CurrentSpineIndex > 0;
+    public bool CanGoNextChapter => CurrentSpineIndex >= 0 && CurrentSpineIndex < SpineCount - 1;
+
+    public int CurrentPageInChapter { get; private set; }
+    public int ChapterPageCount { get; private set; } = 1;
+    public bool CanGoForward => CanGoNextChapter || CurrentPageInChapter < ChapterPageCount - 1;
+    public bool CanGoBack => CanGoPrevChapter || CurrentPageInChapter > 0;
 
     public ReaderControl()
     {
@@ -29,14 +39,27 @@ public sealed partial class ReaderControl : UserControl
     {
         _epubReader = reader;
         CurrentSpineIndex = -1;
+        CurrentPageInChapter = 0;
+        ChapterPageCount = 1;
         await EnsureWebViewReadyAsync();
         ShowSpineItem(0);
     }
 
-    public void GoPrev() => ShowSpineItem(CurrentSpineIndex - 1);
-    public void GoNext() => ShowSpineItem(CurrentSpineIndex + 1);
+    /// <summary>Advance one page; spills into the next chapter at end of current.</summary>
+    public async Task GoForwardAsync()
+    {
+        if (_epubReader is null || !_webViewReady) return;
+        await WebView.CoreWebView2.ExecuteScriptAsync("window.Reader && window.Reader.nextPage()");
+    }
 
-    public void ShowSpineItem(int index)
+    /// <summary>Retreat one page; spills into the previous chapter (last page) at start of current.</summary>
+    public async Task GoBackAsync()
+    {
+        if (_epubReader is null || !_webViewReady) return;
+        await WebView.CoreWebView2.ExecuteScriptAsync("window.Reader && window.Reader.prevPage()");
+    }
+
+    public void ShowSpineItem(int index, bool startAtLastPage = false)
     {
         if (_epubReader is null) return;
         if (index < 0 || index >= _epubReader.Book.Spine.Count) return;
@@ -44,10 +67,13 @@ public sealed partial class ReaderControl : UserControl
         var item = _epubReader.Book.Spine[index];
         var zipPath = _epubReader.ResolveHref(item.ManifestItem.Href);
         var url = $"{SchemeName}://{Authority}/{zipPath}";
+        if (startAtLastPage) url += "#__last_page";
         Debug.WriteLine($"[ReaderControl] Navigating to: {url}");
         WebView.CoreWebView2.Navigate(url);
 
         CurrentSpineIndex = index;
+        CurrentPageInChapter = 0;
+        ChapterPageCount = 1;
         SpineChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -73,16 +99,55 @@ public sealed partial class ReaderControl : UserControl
 
         WebView.CoreWebView2.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Light;
 
+        await WebView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(ReaderScript);
+
         WebView.CoreWebView2.AddWebResourceRequestedFilter(
             $"{SchemeName}://*",
             CoreWebView2WebResourceContext.All);
         WebView.CoreWebView2.WebResourceRequested += OnWebResourceRequested;
+        WebView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
         WebView.CoreWebView2.NavigationStarting += (s, e) =>
             Debug.WriteLine($"[ReaderControl] NavigationStarting: {e.Uri}");
         WebView.CoreWebView2.NavigationCompleted += (s, e) =>
             Debug.WriteLine($"[ReaderControl] NavigationCompleted: success={e.IsSuccess}, status={e.WebErrorStatus}, httpStatus={e.HttpStatusCode}");
 
         _webViewReady = true;
+    }
+
+    private void OnWebMessageReceived(CoreWebView2 sender, CoreWebView2WebMessageReceivedEventArgs args)
+    {
+        try
+        {
+            var json = args.WebMessageAsJson;
+            using var doc = JsonDocument.Parse(json);
+            var type = doc.RootElement.GetProperty("type").GetString();
+
+            switch (type)
+            {
+                case "pageChanged":
+                    CurrentPageInChapter = doc.RootElement.GetProperty("page").GetInt32();
+                    ChapterPageCount = doc.RootElement.GetProperty("total").GetInt32();
+                    Debug.WriteLine($"[ReaderControl] pageChanged: {CurrentPageInChapter + 1}/{ChapterPageCount}");
+                    PageChanged?.Invoke(this, EventArgs.Empty);
+                    break;
+
+                case "endOfChapter":
+                    Debug.WriteLine("[ReaderControl] endOfChapter — advancing to next spine item");
+                    if (CanGoNextChapter)
+                        ShowSpineItem(CurrentSpineIndex + 1);
+                    break;
+
+                case "startOfChapter":
+                    Debug.WriteLine("[ReaderControl] startOfChapter — going back to previous spine item, last page");
+                    if (CanGoPrevChapter)
+                        ShowSpineItem(CurrentSpineIndex - 1, startAtLastPage: true);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[ReaderControl] WebMessage parse error: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private void OnWebResourceRequested(CoreWebView2 sender, CoreWebView2WebResourceRequestedEventArgs args)
@@ -135,4 +200,12 @@ public sealed partial class ReaderControl : UserControl
         return MimeTypes.FromExtension(Path.GetExtension(zipPath));
     }
 
+    private static string LoadEmbeddedResource(string resourceName)
+    {
+        var asm = typeof(ReaderControl).Assembly;
+        using var stream = asm.GetManifestResourceStream(resourceName)
+            ?? throw new InvalidOperationException($"Embedded resource not found: {resourceName}");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
 }

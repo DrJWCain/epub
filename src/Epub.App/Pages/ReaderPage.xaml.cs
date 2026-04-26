@@ -10,15 +10,16 @@ public sealed partial class ReaderPage : Page
     public ReaderPage()
     {
         InitializeComponent();
+        ReaderControl.PageChanged += (s, e) => UpdateNavState();
         ReaderControl.SpineChanged += (s, e) => UpdateNavState();
     }
 
     private void UpdateNavState()
     {
-        PrevButton.IsEnabled = ReaderControl.CanGoPrev;
-        NextButton.IsEnabled = ReaderControl.CanGoNext;
+        PrevButton.IsEnabled = ReaderControl.CanGoBack;
+        NextButton.IsEnabled = ReaderControl.CanGoForward;
         ProgressLabel.Text = ReaderControl.SpineCount > 0
-            ? $"{ReaderControl.CurrentSpineIndex + 1} / {ReaderControl.SpineCount}"
+            ? $"Ch {ReaderControl.CurrentSpineIndex + 1} / {ReaderControl.SpineCount}  •  Page {ReaderControl.CurrentPageInChapter + 1} / {ReaderControl.ChapterPageCount}"
             : "—";
     }
 
@@ -40,7 +41,7 @@ public sealed partial class ReaderPage : Page
         await ReaderControl.LoadBookAsync(reader);
     }
 
-    private void Prev_Click(object sender, RoutedEventArgs e) => ReaderControl.GoPrev();
+    private async void Prev_Click(object sender, RoutedEventArgs e) => await ReaderControl.GoBackAsync();
 
-    private void Next_Click(object sender, RoutedEventArgs e) => ReaderControl.GoNext();
+    private async void Next_Click(object sender, RoutedEventArgs e) => await ReaderControl.GoForwardAsync();
 }
