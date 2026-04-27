@@ -124,12 +124,18 @@
                 if (x < w * 0.4) Reader.prevPage();
                 else if (x > w * 0.6) Reader.nextPage();
             }
-            // pointerdown fires for touch and mouse; we restrict click to non-touch to avoid double-firing.
+            // pointerdown handles touch/pen (click is unreliable in WebView2 for finger taps);
+            // click handles mouse. A touch tap also synthesizes a click event, so guard the click
+            // handler with a timestamp window to avoid double-firing (which advanced 2 pages per tap).
+            var lastTouchNavTime = 0;
             document.addEventListener('pointerdown', function (e) {
-                if (e.pointerType === 'touch' || e.pointerType === 'pen') tryNavOnTap(e);
+                if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+                    lastTouchNavTime = Date.now();
+                    tryNavOnTap(e);
+                }
             }, true);
             document.addEventListener('click', function (e) {
-                // mouseEvent.pointerType isn't on click; check sourceCapabilities or just always handle for mouse.
+                if (Date.now() - lastTouchNavTime < 500) return;
                 tryNavOnTap(e);
             }, true);
         },
