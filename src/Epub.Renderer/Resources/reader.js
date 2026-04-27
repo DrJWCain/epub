@@ -93,6 +93,20 @@
                 resizeTimer = setTimeout(function () { Reader.recomputeAndShow(); }, 100);
             });
 
+            // Same-document fragment navigation: the host calls Navigate with the
+            // same path and a new hash (TOC link clicked from within the same
+            // chapter, search result that happens to land in the open chapter).
+            // Chromium does not reload, so init won't re-run; we have to handle
+            // the hash transition explicitly.
+            window.addEventListener('hashchange', function () {
+                var newHash = window.location.hash;
+                if (!newHash || !Reader.wrapper) return;
+                try { history.replaceState(null, '', window.location.pathname); } catch (e) {}
+                Reader.lastFindHit = null;
+                Reader.recompute();
+                Reader.goToPage(Reader.pageForInitialHash(newHash));
+            });
+
             // WebView2 captures keys when focused, so handle nav keys here.
             document.addEventListener('keydown', function (e) {
                 var t = e.target;
