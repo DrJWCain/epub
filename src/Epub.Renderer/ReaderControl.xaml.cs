@@ -48,6 +48,25 @@ public sealed partial class ReaderControl : UserControl
         ShowSpineItem(spine, hash);
     }
 
+    /// <summary>
+    /// Open a book at a specific character offset within a spine item — used by
+    /// search hits to land on the matching paragraph. Mirrors the offset contract
+    /// established by <c>Epub.Search.SpineTextExtractor</c>: the JS-side walker in
+    /// reader.js counts text-node lengths plus a '\n' on every block-element close.
+    /// </summary>
+    public async Task LoadBookAtOffsetAsync(EpubReader reader, int initialSpineIndex, int initialCharOffset)
+    {
+        _epubReader = reader;
+        CurrentSpineIndex = -1;
+        CurrentPageInChapter = 0;
+        ChapterPageCount = 1;
+        await EnsureWebViewReadyAsync();
+
+        var spine = Math.Clamp(initialSpineIndex, 0, Math.Max(0, reader.Book.Spine.Count - 1));
+        var hash = $"#__offset_{Math.Max(0, initialCharOffset)}";
+        ShowSpineItem(spine, hash);
+    }
+
     /// <summary>Advance one page; spills into the next chapter at end of current.</summary>
     public async Task GoForwardAsync()
     {

@@ -43,8 +43,14 @@ public sealed partial class ReaderPage : Page
         var path = _session.PendingBookPath;
         if (!string.IsNullOrEmpty(path) && File.Exists(path))
         {
-            _session.PendingBookPath = null; // consume
-            await OpenAsync(path);
+            // Snapshot every pending field together so a slow Open doesn't race a new
+            // search-result navigation that arrives mid-flight.
+            var pendingSpine = _session.PendingSpineIndex;
+            var pendingCharOffset = _session.PendingCharOffset;
+            _session.PendingBookPath = null;
+            _session.PendingSpineIndex = null;
+            _session.PendingCharOffset = null;
+            await OpenAsync(path, pendingSpine, pendingCharOffset);
         }
     }
 
@@ -54,7 +60,7 @@ public sealed partial class ReaderPage : Page
         (App.Current.MainWindow as MainWindow)?.SetTitleBarTitle(null);
     }
 
-    private async Task OpenAsync(string path)
+    private async Task OpenAsync(string path, int? pendingSpineIndex = null, int? pendingCharOffset = null)
     {
         var reader = await EpubReader.OpenAsync(path);
 
@@ -66,11 +72,24 @@ public sealed partial class ReaderPage : Page
         EmptyState.Visibility = Visibility.Collapsed;
         ReaderControl.Visibility = Visibility.Visible;
 
-        var saved = await _positionStore.GetAsync(path);
-        await ReaderControl.LoadBookAsync(
-            reader,
-            initialSpineIndex: saved?.SpineIndex ?? 0,
-            initialPageInChapter: saved?.PageInChapter ?? 0);
+        if (pendingCharOffset is { } charOffset)
+        {
+            // Search-result hand-off — land at the matching paragraph rather than
+            // the last-read position. The position store still gets updated as
+            // soon as the user turns a page (see SchedulePositionSave).
+            await ReaderControl.LoadBookAtOffsetAsync(
+                reader,
+                initialSpineIndex: pendingSpineIndex ?? 0,
+                initialCharOffset: charOffset);
+        }
+        else
+        {
+            var saved = await _positionStore.GetAsync(path);
+            await ReaderControl.LoadBookAsync(
+                reader,
+                initialSpineIndex: saved?.SpineIndex ?? 0,
+                initialPageInChapter: saved?.PageInChapter ?? 0);
+        }
 
         LoadToc(reader.Book);
         _currentBookTitle = reader.Book.Metadata.Title;

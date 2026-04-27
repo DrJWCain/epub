@@ -7,6 +7,15 @@
     var IMG_VERTICAL_SLACK = 60; // extra px to cap image height by, so ancestor wrapper margins don't push the image past column height
     var GAP = SIDE_MARGIN * 2;   // column-gap absorbs the would-be padding without leaking
 
+    // Block-tag list MUST match Epub.Search.SpineTextExtractor.BlockTags exactly.
+    // Both walkers (this one and the C# extractor) emit a single '\n' on the close
+    // of these elements; any divergence breaks search-result navigation alignment.
+    var BLOCK_TAGS = {
+        'p': 1, 'div': 1, 'h1': 1, 'h2': 1, 'h3': 1, 'h4': 1, 'h5': 1, 'h6': 1,
+        'li': 1, 'blockquote': 1, 'pre': 1, 'td': 1, 'th': 1, 'tr': 1, 'br': 1,
+        'section': 1, 'article': 1, 'aside': 1, 'figure': 1, 'figcaption': 1, 'hr': 1
+    };
+
     var css = [
         'html, body { width: 100%; height: 100%; margin: 0 !important; padding: 0 !important; overflow: hidden !important; touch-action: manipulation; }',
         '#' + WRAPPER_ID + ' {',
@@ -155,6 +164,21 @@
                 var p = parseInt(pageMatch[1], 10);
                 return Math.max(0, Math.min(p, this.pageCount - 1));
             }
+            // Search-hit char-offset anchor — walk text nodes accumulating lengths
+            // (with '\n' for block closes, mirroring SpineTextExtractor) until we
+            // pass the target, then compute the column-page from the parent
+            // element's bounding rect.
+            var offsetMatch = hash.match(/^#__offset_(\d+)$/);
+            if (offsetMatch) {
+                var target = parseInt(offsetMatch[1], 10);
+                var found = this.findNodeAtOffset(target);
+                if (!found || !this.wrapper) return 0;
+                var orect = found.element.getBoundingClientRect();
+                var owrect = this.wrapper.getBoundingClientRect();
+                var ox = orect.left - owrect.left;
+                var ostride = this.wrapper.clientWidth + GAP;
+                return Math.max(0, Math.min(Math.floor((ox + 4) / ostride), this.pageCount - 1));
+            }
             // Element-id anchor — find element, compute which page contains it.
             try {
                 var id = decodeURIComponent(hash.substring(1));
@@ -172,6 +196,64 @@
                 return Math.max(0, Math.min(Math.floor((x + 4) / stride), this.pageCount - 1));
             } catch (e) { /* malformed hash */ }
             return 0;
+        },
+
+        // Walks the wrapper subtree accumulating text-node lengths plus a '\n' for
+        // each closing block-level element. Skips script/style/comment subtrees
+        // entirely. Stops when the running total crosses `target`, returning the
+        // text node's parent element and the offset within the matched node.
+        // Contract MUST match Epub.Search.SpineTextExtractor.
+        findNodeAtOffset: function (target) {
+            if (!this.wrapper) return null;
+            var state = { offset: 0, found: null };
+            this._walkForOffset(this.wrapper, target, state);
+            return state.found;
+        },
+
+        _walkForOffset: function (node, target, state) {
+            if (state.found) return;
+
+            var nt = node.nodeType;
+            if (nt === 3 /* TEXT_NODE */) {
+                var len = (node.nodeValue || '').length;
+                if (state.offset + len > target) {
+                    state.found = {
+                        element: node.parentElement || node.parentNode,
+                        localOffset: target - state.offset
+                    };
+                }
+                state.offset += len;
+                return;
+            }
+            if (nt === 8 /* COMMENT_NODE */) return;
+
+            if (nt !== 1 /* ELEMENT_NODE */) {
+                var kids = node.childNodes;
+                for (var i = 0; i < kids.length; i++) {
+                    this._walkForOffset(kids[i], target, state);
+                    if (state.found) return;
+                }
+                return;
+            }
+
+            var tag = (node.localName || '').toLowerCase();
+            if (tag === 'script' || tag === 'style') return;
+
+            var children = node.childNodes;
+            for (var j = 0; j < children.length; j++) {
+                this._walkForOffset(children[j], target, state);
+                if (state.found) return;
+            }
+
+            if (BLOCK_TAGS[tag]) {
+                // Block close emits '\n'. If target lands exactly on this '\n',
+                // resolve to the block element itself (rare; only happens for
+                // empty-paragraph offsets that the chunker shouldn't emit anyway).
+                if (state.offset === target) {
+                    state.found = { element: node, localOffset: 0 };
+                }
+                state.offset += 1;
+            }
         },
 
         recompute: function () {
