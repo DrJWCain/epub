@@ -1,8 +1,8 @@
 # WinUI 3 EPUB Reader — Build Plan
 
-## Status snapshot (2026-04-26)
+## Status snapshot (2026-04-27)
 
-**7 of 8 MVP milestones complete.** App is genuinely usable: open it, see your 47 books as covers, tap one, page through with arrows / buttons / taps, jump around via TOC. Chapters flow seamlessly into each other. Tap-zones work on the Surface tablet.
+**MVP complete — 8 of 8 milestones done.** App is genuinely usable: open it, see your 47 books as covers, tap one, page through with arrows / buttons / taps, jump around via TOC. Chapters flow seamlessly into each other. Tap-zones work on the Surface tablet. Close the app and reopen the book — it lands where you left off. Window launches maximized; F11 toggles borderless fullscreen.
 
 | | Milestone | Commit | Notes |
 |---|---|---|---|
@@ -15,11 +15,15 @@
 | ✅ | (Settings) | `f1440cc` | ApplicationData.LocalSettings + library folder picker |
 | ✅ | M6 — Library + cover grid | `14abda0` | Scans folder, GridView of cover tiles, click-to-read |
 | ✅ | (Tap-zones) | `8ec56dd` | Touch tap-to-turn-page (left 40% prev, right 40% next) |
-| ⏭️ | **M7 — Persistence** | — | **MVP closer**: SQLite for last-read position |
+| ✅ | (Shell UX) | `769402e` | Maximized launch, F11 fullscreen, book title in title bar |
+| ✅ | **M7 — Persistence** | `e5448fe` | SQLite `reading_positions` table, debounced save, restore on open |
 | ⏳ | M8–M12 | — | Themes/typography, bookmarks/highlights, search, polish, MSIX packaging |
 
 **Open follow-ups (parked, not blockers):**
 - **Cover/title-page polish** — handful of books still render cover on page 2/2 (publisher CSS edge cases beyond the 60px slack). Tracked.
+- **Position-save flush on window close** — current 1s debounce means closing within a second of a page turn loses that page. Hook `Window.Closed`.
+- **PositionStore tests** — `Epub.Library.Tests` project exists but no tests yet for the SQLite store.
+- **Position drift on viewport change** — saved page-in-chapter is viewport-dependent; resizing the window between sessions can land on a slightly different page. Real fix is CFI in v2 (location-format decision was already locked behind `IBookLocation`).
 - FluentAssertions 8 license warning on test runs (drop to AwesomeAssertions if it gets annoying)
 - `.gitattributes` for `* text=auto` to silence CRLF warnings
 
@@ -144,11 +148,11 @@ Hard rule: **`Epub.Core` has zero dependency on WinUI, WebView2, or SQLite.** Ke
 - Grid view with covers, titles, authors
 - Right-click → remove / show in Explorer
 
-### M7 — Persistence (1 day)
-- SQLite schema: `books`, `reading_positions` (bookId, cfi, percent, updatedAt), `bookmarks`, `annotations`
-- Save reading position on chapter/page change (debounced)
-- Restore on book open
-- **CFI** (`Epub.Core/Cfi/`) — port the algorithm from epub.js's CFI module; this is the only "intellectually expensive" piece left. Required for stable bookmarks.
+### M7 — Persistence ✅ (built 2026-04-27, `e5448fe`)
+- SQLite at `ApplicationData.LocalFolder\library.db`, single `reading_positions` table keyed on book path.
+- Save debounced 1s on `PageChanged`. Restore on book open via new `LoadBookAsync(reader, initialSpineIndex, initialPageInChapter)` overload.
+- `reader.js` learns a `#__page_N` init hash so restore lands during the suppressed-transition pass — no flash on open.
+- CFI deferred to v2 per the locked location-format decision (`IBookLocation` interface stub already there). Bookmarks/annotations tables not built — out of MVP scope, will add when M9 needs them.
 
 ### M8 — Themes & typography (1 day)
 - Reader settings flyout: font size, line height, font family, margin width
@@ -265,4 +269,4 @@ These weren't in the original plan but real EPUBs forced them:
 
 ## 9. Next step
 
-**M7 — Persistence**: SQLite-backed last-read position per book, so reopening a book lands on the page you left. Plan budget 1 day. Closes the MVP.
+**MVP done.** Likely next: **M8 — Themes & typography** (font size / line height / family / margin width / light-dark-sepia, all via injected CSS custom properties — no reload). After that, M9 bookmarks/highlights is the natural follow-on since they share the location-format work that M7 left stubbed at `{spineIndex, charOffset}`. Real CFI port (~500 lines from epub.js) becomes worthwhile then.
