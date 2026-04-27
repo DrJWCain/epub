@@ -8,7 +8,7 @@ Turn the library from "books I can read" into "a navigable space of ideas." Loca
 
 ## 2. Locked decisions (2026-04-27)
 
-- **Local-only.** No hosted embedding or LLM APIs. Offline stays a product property.
+- **Local inference, one-time model fetch.** No hosted embedding or LLM APIs at runtime. The MiniLM ONNX model and tokenizer vocab are downloaded once on first index build (network-required only at that moment) and cached locally; everything after that is offline.
 - **Bulk-then-incremental indexing.** A "Build index" command in Settings; user accepts a one-time multi-minute hit. After that, new books are indexed in the background as they appear.
 - **No book removal path.** User has stated they will never remove books — schema and refit logic do not need tombstones, compaction, or orphan cleanup.
 - **2D first, 3D as wow-mode.** Same data, different view. 3D ships as a toggle on the map page, not a separate data path.
@@ -19,7 +19,7 @@ Turn the library from "books I can read" into "a navigable space of ideas." Loca
 | Concern | Choice | Why |
 |---|---|---|
 | Vector store | **Managed brute-force cosine** over `float[]` BLOBs in existing `library.db`, behind an `IVectorIndex` abstraction | sqlite-vec ships no win-arm64 prebuilt (P0 spike, 2026-04-27); brute-force scans 10k × 384-dim in <500 ms with `Vector<T>` SIMD, ample headroom for 47-book corpus. Swap to managed HNSW behind the interface if scale ever demands it. |
-| Embedding model | **all-MiniLM-L6-v2** (384-dim) via **ONNX Runtime** | ~80 MB, CPU-fast on ARM64, well-validated for English |
+| Embedding model | **all-MiniLM-L6-v2** (384-dim) via **ONNX Runtime**, downloaded from Hugging Face on first use into `ApplicationData.LocalFolder\models\minilm\` | ~90 MB, CPU-fast on ARM64, well-validated for English. Download-on-first-run keeps the appx small and the repo clean; loses pure offline-first only on the very first index build. SHA-256 verification + atomic rename, idempotent on retry. |
 | Tokenizer | **Microsoft.ML.Tokenizers** BertTokenizer | Pairs cleanly with MiniLM |
 | Clustering | **HDBSCAN.NET** | Variable-density clusters surface real themes; no K to pick |
 | 2D projection | **UMAP.NET** (precompute on full refit) | Stored as `(x, y)` columns; reused for 3D's first two axes |
