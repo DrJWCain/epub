@@ -31,6 +31,15 @@
                     Style="{StaticResource BodyTextBlockStyle}"
                     Text="" />
             </AppBarElementContainer>
+            <AppBarElementContainer VerticalAlignment="Center" Visibility="Collapsed" x:Name="IndexingStatusContainer">
+                <TextBlock
+                    x:Name="IndexingStatusLabel"
+                    Padding="8,0"
+                    VerticalAlignment="Center"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="" />
+            </AppBarElementContainer>
         </CommandBar>
 
         <Grid Grid.Row="1">

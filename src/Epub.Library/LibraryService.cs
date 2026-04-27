@@ -4,6 +4,8 @@ namespace Epub.Library;
 
 public sealed class LibraryService : ILibraryService
 {
+    public event EventHandler<IReadOnlyList<string>>? BooksScanned;
+
     public async Task<IReadOnlyList<LibraryEntry>> ScanFolderAsync(string folderPath, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(folderPath) || !Directory.Exists(folderPath))
@@ -27,6 +29,14 @@ public sealed class LibraryService : ILibraryService
                 // Skip unreadable EPUBs silently — the alternative is to crash the whole scan.
             }
         }
+
+        if (entries.Count > 0)
+        {
+            var paths2 = entries.Select(e => e.FilePath).ToList();
+            try { BooksScanned?.Invoke(this, paths2); }
+            catch { /* never let a subscriber crash the scan */ }
+        }
+
         return entries;
     }
 

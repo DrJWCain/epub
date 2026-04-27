@@ -1,8 +1,10 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Epub_App.Pages;
+using Epub_App.Services;
 
 // To learn more about WinUI, the WinUI project structure,
 // and more about our project templates, see: http://aka.ms/winui-project-info.
@@ -24,6 +26,10 @@ public sealed partial class MainWindow : Window
         {
             presenter.Maximize();
         }
+
+        // Eagerly construct the background indexing coordinator so its subscription
+        // to LibraryService.BooksScanned is wired up before the first scan fires.
+        App.Current.Services.GetRequiredService<IndexingBackgroundCoordinator>();
     }
 
     private void TitleBar_PaneToggleRequested(TitleBar sender, object args)

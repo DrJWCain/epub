@@ -13,6 +13,7 @@ public sealed partial class LibraryPage : Page
     private readonly ILibraryService _library;
     private readonly ISettingsService _settings;
     private readonly IBookSession _session;
+    private readonly IndexingBackgroundCoordinator _indexingCoordinator;
 
     public LibraryPage()
     {
@@ -20,12 +21,34 @@ public sealed partial class LibraryPage : Page
         _library = App.Current.Services.GetRequiredService<ILibraryService>();
         _settings = App.Current.Services.GetRequiredService<ISettingsService>();
         _session = App.Current.Services.GetRequiredService<IBookSession>();
+        _indexingCoordinator = App.Current.Services.GetRequiredService<IndexingBackgroundCoordinator>();
+        _indexingCoordinator.StatusChanged += OnIndexingStatusChanged;
+        UpdateIndexingStatus(_indexingCoordinator.CurrentStatus);
     }
 
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
         await LoadLibraryAsync();
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        base.OnNavigatedFrom(e);
+        _indexingCoordinator.StatusChanged -= OnIndexingStatusChanged;
+    }
+
+    private void OnIndexingStatusChanged(object? sender, string? status)
+    {
+        DispatcherQueue.TryEnqueue(() => UpdateIndexingStatus(status));
+    }
+
+    private void UpdateIndexingStatus(string? status)
+    {
+        IndexingStatusLabel.Text = status ?? "";
+        IndexingStatusContainer.Visibility = string.IsNullOrEmpty(status)
+            ? Visibility.Collapsed
+            : Visibility.Visible;
     }
 
     private async Task LoadLibraryAsync()
