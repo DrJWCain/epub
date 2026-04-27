@@ -71,6 +71,9 @@ public sealed partial class MainWindow : Window
                 case "reader":
                     NavFrame.Navigate(typeof(ReaderPage));
                     break;
+                case "search":
+                    NavFrame.Navigate(typeof(SearchPage));
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown navigation item tag: {item.Tag}");
             }
