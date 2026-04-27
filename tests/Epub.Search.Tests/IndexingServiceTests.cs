@@ -1,24 +1,27 @@
 using System.IO.Compression;
 using System.Text;
 using Epub.Search.Embedding;
+using Epub.Search.Tests.Fixtures;
 using FluentAssertions;
 
 namespace Epub.Search.Tests;
 
 /// <summary>
-/// End-to-end tests for IndexingService. Gated on the MiniLM model being already
-/// downloaded (run with EPUB_SEARCH_DOWNLOAD_MODEL=1 the first time, or after the
-/// real app has built its index once).
+/// End-to-end tests for IndexingService. Share a single warmed embedder via
+/// <see cref="ModelFixture"/> so the suite runs in seconds rather than minutes.
+/// Auto-skip if the shared model isn't cached.
 /// </summary>
+[Collection(ModelCollection.Name)]
 public sealed class IndexingServiceTests
 {
-    private static readonly string SharedTestCacheDir = Path.Combine(
-        Path.GetTempPath(), "epub-search-test-models");
+    private readonly ModelFixture _model;
+
+    public IndexingServiceTests(ModelFixture model) => _model = model;
 
     [Fact]
     public async Task IndexBook_EndToEnd_PersistsChunksAndEnablesSemanticSearch()
     {
-        await using var bench = await TestBench.SetupOrSkip();
+        await using var bench = TestBench.Create(_model);
         if (bench is null) return;
 
         var bookPath = bench.WriteEpub(SyntheticEpub3Spines());
@@ -46,7 +49,7 @@ public sealed class IndexingServiceTests
     [Fact]
     public async Task IndexBook_AlreadyIndexed_NoOpsAndDoesNotDuplicate()
     {
-        await using var bench = await TestBench.SetupOrSkip();
+        await using var bench = TestBench.Create(_model);
         if (bench is null) return;
 
         var bookPath = bench.WriteEpub(SyntheticEpub3Spines());
@@ -64,7 +67,7 @@ public sealed class IndexingServiceTests
     [Fact]
     public async Task BuildAll_ReportsProgressForEachBook_WithChunkCounts()
     {
-        await using var bench = await TestBench.SetupOrSkip();
+        await using var bench = TestBench.Create(_model);
         if (bench is null) return;
 
         var path1 = bench.WriteEpub(SyntheticEpub3Spines(), "a.epub");
@@ -83,7 +86,7 @@ public sealed class IndexingServiceTests
     [Fact]
     public async Task BuildAll_ContinuesPastBookErrors_AndReportsLastError()
     {
-        await using var bench = await TestBench.SetupOrSkip();
+        await using var bench = TestBench.Create(_model);
         if (bench is null) return;
 
         var goodPath = bench.WriteEpub(SyntheticEpub3Spines(), "good.epub");
@@ -101,7 +104,7 @@ public sealed class IndexingServiceTests
     [Fact]
     public async Task IsRunning_TrueDuringBuild_AndConcurrentCallsThrow()
     {
-        await using var bench = await TestBench.SetupOrSkip();
+        await using var bench = TestBench.Create(_model);
         if (bench is null) return;
 
         var path = bench.WriteEpub(SyntheticEpub3Spines());
@@ -238,15 +241,9 @@ public sealed class IndexingServiceTests
             IndexingService = new IndexingService(store, embedder);
         }
 
-        public static async Task<TestBench?> SetupOrSkip()
+        public static TestBench? Create(ModelFixture fixture)
         {
-            var downloader = new MiniLmModelDownloader(SharedTestCacheDir);
-            if (!downloader.IsDownloaded)
-            {
-                if (Environment.GetEnvironmentVariable("EPUB_SEARCH_DOWNLOAD_MODEL") != "1")
-                    return null;  // silent skip
-                await downloader.EnsureDownloadedAsync(progress: null, ct: default);
-            }
+            if (!fixture.IsAvailable) return null;
 
             var temp = Path.Combine(Path.GetTempPath(),
                 "epub-search-indexing-test-" + Guid.NewGuid().ToString("N"));
@@ -254,10 +251,7 @@ public sealed class IndexingServiceTests
 
             var dbPath = Path.Combine(temp, "library.db");
             var store = new EmbeddingStore(dbPath);
-            var embedder = new MiniLmEmbedder(downloader);
-            await embedder.EnsureReadyAsync();
-
-            return new TestBench(temp, store, embedder);
+            return new TestBench(temp, store, fixture.Embedder!);
         }
 
         public string WriteEpub(byte[] bytes, string fileName = "test.epub")
@@ -269,7 +263,7 @@ public sealed class IndexingServiceTests
 
         public ValueTask DisposeAsync()
         {
-            Embedder.Dispose();
+            // Embedder is owned by ModelFixture; don't dispose here.
             try { Directory.Delete(TempDir, recursive: true); }
             catch { /* best effort */ }
             return ValueTask.CompletedTask;

@@ -1,20 +1,21 @@
 using Epub.Search.Embedding;
+using Epub.Search.Tests.Fixtures;
 using FluentAssertions;
 
 namespace Epub.Search.Tests;
 
 /// <summary>
 /// MiniLmEmbedder argument-validation and lifecycle tests run unconditionally.
-/// Inference tests are gated on the MiniLM model being already downloaded into
-/// <see cref="SharedTestCacheDir"/>; the first time you let the app build its
-/// index that download will populate the cache, and after that these tests
-/// activate automatically. To trigger the download manually, set the env var
-/// EPUB_SEARCH_DOWNLOAD_MODEL=1 before running the test suite.
+/// Inference tests share a single warmed embedder via <see cref="ModelFixture"/>;
+/// they auto-skip if the model isn't cached. Set EPUB_SEARCH_DOWNLOAD_MODEL=1 to
+/// trigger a one-time download into the shared test cache.
 /// </summary>
+[Collection(ModelCollection.Name)]
 public sealed class MiniLmEmbedderTests
 {
-    private static readonly string SharedTestCacheDir = Path.Combine(
-        Path.GetTempPath(), "epub-search-test-models");
+    private readonly ModelFixture _model;
+
+    public MiniLmEmbedderTests(ModelFixture model) => _model = model;
 
     [Fact]
     public void Constructor_RejectsNullDownloader()
@@ -55,15 +56,14 @@ public sealed class MiniLmEmbedderTests
         embedder.Dimension.Should().Be(MiniLmEmbedder.EmbeddingDimension).And.Be(384);
     }
 
-    // ──────── integration tests below; auto-skip if model isn't cached ────────
+    // ──────── integration tests below; auto-skip if shared model isn't cached ────────
 
     [Fact]
     public async Task Embed_ProducesUnitNormalizedVectorsOfDimension384()
     {
-        if (await EnsureModelOrSkip() is not { } embedder) return;
-        using var _ = embedder;
+        if (!_model.IsAvailable) return;
 
-        var vectors = await embedder.EmbedAsync(new[] { "A short sentence about cats." });
+        var vectors = await _model.Embedder!.EmbedAsync(new[] { "A short sentence about cats." });
 
         vectors.Should().ContainSingle();
         vectors[0].Length.Should().Be(384);
@@ -77,10 +77,9 @@ public sealed class MiniLmEmbedderTests
     [Fact]
     public async Task Embed_SimilarSentences_HaveHigherCosineThanUnrelated()
     {
-        if (await EnsureModelOrSkip() is not { } embedder) return;
-        using var _ = embedder;
+        if (!_model.IsAvailable) return;
 
-        var vectors = await embedder.EmbedAsync(new[]
+        var vectors = await _model.Embedder!.EmbedAsync(new[]
         {
             "The cat sat on the mat.",
             "A feline rested on the rug.",
@@ -95,27 +94,12 @@ public sealed class MiniLmEmbedderTests
     }
 
     [Fact]
-    public async Task CountTokens_OnSimpleSentence_ReturnsReasonableCount()
+    public void CountTokens_OnSimpleSentence_ReturnsReasonableCount()
     {
-        if (await EnsureModelOrSkip() is not { } embedder) return;
-        using var _ = embedder;
+        if (!_model.IsAvailable) return;
 
-        var n = embedder.CountTokens("The quick brown fox jumps over the lazy dog.");
+        var n = _model.Embedder!.CountTokens("The quick brown fox jumps over the lazy dog.");
         n.Should().BeInRange(8, 20, "BERT WordPiece for a 9-word English sentence falls in this range");
-    }
-
-    private static async Task<MiniLmEmbedder?> EnsureModelOrSkip()
-    {
-        var downloader = new MiniLmModelDownloader(SharedTestCacheDir);
-        if (!downloader.IsDownloaded)
-        {
-            if (Environment.GetEnvironmentVariable("EPUB_SEARCH_DOWNLOAD_MODEL") != "1")
-                return null;  // silent skip
-            await downloader.EnsureDownloadedAsync(progress: null, ct: default);
-        }
-        var embedder = new MiniLmEmbedder(downloader);
-        await embedder.EnsureReadyAsync();
-        return embedder;
     }
 
     private static double Cosine(float[] a, float[] b)
