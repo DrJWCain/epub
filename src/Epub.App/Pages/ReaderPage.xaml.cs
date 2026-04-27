@@ -1,7 +1,9 @@
 using Epub.Core;
 using Epub.Core.Models;
+using Epub.Library;
 using Epub_App.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
@@ -12,13 +14,23 @@ namespace Epub_App.Pages;
 public sealed partial class ReaderPage : Page
 {
     private readonly IBookSession _session;
+    private readonly IPositionStore _positionStore;
+    private readonly DispatcherQueueTimer _saveTimer;
     private string? _currentBookTitle;
+    private string? _currentBookPath;
 
     public ReaderPage()
     {
         InitializeComponent();
         _session = App.Current.Services.GetRequiredService<IBookSession>();
-        ReaderControl.PageChanged += (s, e) => UpdateNavState();
+        _positionStore = App.Current.Services.GetRequiredService<IPositionStore>();
+
+        _saveTimer = DispatcherQueue.CreateTimer();
+        _saveTimer.Interval = TimeSpan.FromSeconds(1);
+        _saveTimer.IsRepeating = false;
+        _saveTimer.Tick += (s, e) => _ = SavePositionAsync();
+
+        ReaderControl.PageChanged += (s, e) => { UpdateNavState(); SchedulePositionSave(); };
         ReaderControl.SpineChanged += (s, e) => UpdateNavState();
     }
 
@@ -45,12 +57,52 @@ public sealed partial class ReaderPage : Page
     private async Task OpenAsync(string path)
     {
         var reader = await EpubReader.OpenAsync(path);
+
+        // Once the parser accepts the file, claim it so any incoming page-change
+        // events save against the right path. Set before LoadBookAsync triggers
+        // the first PageChanged.
+        _currentBookPath = path;
+
         EmptyState.Visibility = Visibility.Collapsed;
         ReaderControl.Visibility = Visibility.Visible;
-        await ReaderControl.LoadBookAsync(reader);
+
+        var saved = await _positionStore.GetAsync(path);
+        await ReaderControl.LoadBookAsync(
+            reader,
+            initialSpineIndex: saved?.SpineIndex ?? 0,
+            initialPageInChapter: saved?.PageInChapter ?? 0);
+
         LoadToc(reader.Book);
         _currentBookTitle = reader.Book.Metadata.Title;
         (App.Current.MainWindow as MainWindow)?.SetTitleBarTitle(_currentBookTitle);
+    }
+
+    private void SchedulePositionSave()
+    {
+        if (_currentBookPath is null) return;
+        if (ReaderControl.CurrentSpineIndex < 0) return;
+        _saveTimer.Stop();
+        _saveTimer.Start();
+    }
+
+    private async Task SavePositionAsync()
+    {
+        var path = _currentBookPath;
+        if (path is null) return;
+        if (ReaderControl.CurrentSpineIndex < 0) return;
+
+        var position = new ReadingPosition(
+            ReaderControl.CurrentSpineIndex,
+            ReaderControl.CurrentPageInChapter,
+            DateTimeOffset.UtcNow);
+        try
+        {
+            await _positionStore.SaveAsync(path, position);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ReaderPage] SavePositionAsync failed: {ex}");
+        }
     }
 
     private void LoadToc(Book book)

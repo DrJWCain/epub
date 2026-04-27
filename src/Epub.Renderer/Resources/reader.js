@@ -148,6 +148,13 @@
         pageForInitialHash: function (hash) {
             if (!hash || hash.length <= 1) return 0;
             if (hash === '#__last_page') return this.pageCount - 1;
+            // Restored reading position — land on a specific page index within this chapter.
+            // Page count depends on viewport, so clamp to whatever the current layout produces.
+            var pageMatch = hash.match(/^#__page_(\d+)$/);
+            if (pageMatch) {
+                var p = parseInt(pageMatch[1], 10);
+                return Math.max(0, Math.min(p, this.pageCount - 1));
+            }
             // Element-id anchor — find element, compute which page contains it.
             try {
                 var id = decodeURIComponent(hash.substring(1));

@@ -29,6 +29,9 @@ public partial class App : Application
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IBookSession, BookSession>();
         services.AddSingleton<Epub.Library.ILibraryService, Epub.Library.LibraryService>();
+        services.AddSingleton<Epub.Library.IPositionStore>(_ =>
+            new Epub.Library.PositionStore(
+                Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "library.db")));
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

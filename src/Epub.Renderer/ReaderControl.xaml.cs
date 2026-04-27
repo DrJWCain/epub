@@ -35,14 +35,17 @@ public sealed partial class ReaderControl : UserControl
         InitializeComponent();
     }
 
-    public async Task LoadBookAsync(EpubReader reader)
+    public async Task LoadBookAsync(EpubReader reader, int initialSpineIndex = 0, int initialPageInChapter = 0)
     {
         _epubReader = reader;
         CurrentSpineIndex = -1;
         CurrentPageInChapter = 0;
         ChapterPageCount = 1;
         await EnsureWebViewReadyAsync();
-        ShowSpineItem(0);
+
+        var spine = Math.Clamp(initialSpineIndex, 0, Math.Max(0, reader.Book.Spine.Count - 1));
+        var hash = initialPageInChapter > 0 ? $"#__page_{initialPageInChapter}" : null;
+        ShowSpineItem(spine, hash);
     }
 
     /// <summary>Advance one page; spills into the next chapter at end of current.</summary>
