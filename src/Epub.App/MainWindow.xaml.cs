@@ -1,6 +1,7 @@
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Epub_App.Pages;
 
 // To learn more about WinUI, the WinUI project structure,
@@ -18,11 +19,35 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
         AppWindow.SetIcon("Assets/AppIcon.ico");
+
+        if (AppWindow.Presenter is OverlappedPresenter presenter)
+        {
+            presenter.Maximize();
+        }
     }
 
     private void TitleBar_PaneToggleRequested(TitleBar sender, object args)
     {
         NavView.IsPaneOpen = !NavView.IsPaneOpen;
+    }
+
+    private void ToggleFullScreen_Invoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        if (AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen)
+        {
+            AppWindow.SetPresenter(AppWindowPresenterKind.Overlapped);
+            if (AppWindow.Presenter is OverlappedPresenter overlapped)
+            {
+                overlapped.Maximize();
+            }
+            AppTitleBar.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            AppTitleBar.Visibility = Visibility.Collapsed;
+            AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+        }
     }
 
     private void TitleBar_BackRequested(TitleBar sender, object args)
@@ -50,6 +75,14 @@ public sealed partial class MainWindow : Window
                     throw new InvalidOperationException($"Unknown navigation item tag: {item.Tag}");
             }
         }
+    }
+
+    /// <summary>Set the title bar text. Pass null to reset to the app default.</summary>
+    public void SetTitleBarTitle(string? title)
+    {
+        var resolved = string.IsNullOrWhiteSpace(title) ? "Epub.App" : title;
+        AppTitleBar.Title = resolved;
+        Title = resolved;
     }
 
     /// <summary>Switch the NavigationView to the Reader tab. Used by Library when the user clicks a book.</summary>

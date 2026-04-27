@@ -12,6 +12,7 @@ namespace Epub_App.Pages;
 public sealed partial class ReaderPage : Page
 {
     private readonly IBookSession _session;
+    private string? _currentBookTitle;
 
     public ReaderPage()
     {
@@ -24,12 +25,21 @@ public sealed partial class ReaderPage : Page
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        if (_currentBookTitle is not null)
+            (App.Current.MainWindow as MainWindow)?.SetTitleBarTitle(_currentBookTitle);
+
         var path = _session.PendingBookPath;
         if (!string.IsNullOrEmpty(path) && File.Exists(path))
         {
             _session.PendingBookPath = null; // consume
             await OpenAsync(path);
         }
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        base.OnNavigatedFrom(e);
+        (App.Current.MainWindow as MainWindow)?.SetTitleBarTitle(null);
     }
 
     private async Task OpenAsync(string path)
@@ -39,6 +49,8 @@ public sealed partial class ReaderPage : Page
         ReaderControl.Visibility = Visibility.Visible;
         await ReaderControl.LoadBookAsync(reader);
         LoadToc(reader.Book);
+        _currentBookTitle = reader.Book.Metadata.Title;
+        (App.Current.MainWindow as MainWindow)?.SetTitleBarTitle(_currentBookTitle);
     }
 
     private void LoadToc(Book book)
