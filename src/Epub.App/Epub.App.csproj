@@ -51,6 +51,7 @@
     <ProjectReference Include="..\Epub.Core\Epub.Core.csproj" />
     <ProjectReference Include="..\Epub.Library\Epub.Library.csproj" />
     <ProjectReference Include="..\Epub.Renderer\Epub.Renderer.csproj" />
+    <ProjectReference Include="..\Epub.Search\Epub.Search.csproj" />
   </ItemGroup>
 
   <!--

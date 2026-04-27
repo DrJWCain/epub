@@ -10,9 +10,11 @@
     <Project Path="src/Epub.Core/Epub.Core.csproj" />
     <Project Path="src/Epub.Library/Epub.Library.csproj" />
     <Project Path="src/Epub.Renderer/Epub.Renderer.csproj" />
+    <Project Path="src/Epub.Search/Epub.Search.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Epub.Core.Tests/Epub.Core.Tests.csproj" />
     <Project Path="tests/Epub.Library.Tests/Epub.Library.Tests.csproj" />
+    <Project Path="tests/Epub.Search.Tests/Epub.Search.Tests.csproj" />
   </Folder>
 </Solution>
