@@ -1,3 +1,5 @@
+using Epub.Search;
+using Epub.Search.Embedding;
 using Epub_App.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
@@ -9,13 +11,23 @@ namespace Epub_App.Pages;
 public sealed partial class SettingsPage : Page
 {
     private readonly ISettingsService _settings;
+    private readonly IEmbeddingStore _embeddingStore;
+    private readonly IIndexingService _indexing;
+    private readonly MiniLmEmbedder _embedder;
+    private CancellationTokenSource? _indexCts;
 
     public SettingsPage()
     {
         InitializeComponent();
-        _settings = App.Current.Services.GetRequiredService<ISettingsService>();
-        _settings.Changed += (s, e) => RefreshFolderRow();
+        var services = App.Current.Services;
+        _settings = services.GetRequiredService<ISettingsService>();
+        _embeddingStore = services.GetRequiredService<IEmbeddingStore>();
+        _indexing = services.GetRequiredService<IIndexingService>();
+        _embedder = services.GetRequiredService<MiniLmEmbedder>();
+
+        _settings.Changed += (s, e) => { RefreshFolderRow(); _ = RefreshIndexStatusAsync(); };
         RefreshFolderRow();
+        _ = RefreshIndexStatusAsync();
     }
 
     private void RefreshFolderRow()
@@ -23,6 +35,27 @@ public sealed partial class SettingsPage : Page
         var path = _settings.LibraryFolderPath;
         FolderPathText.Text = string.IsNullOrEmpty(path) ? "(not set)" : path;
         ClearFolderButton.IsEnabled = !string.IsNullOrEmpty(path);
+    }
+
+    private async Task RefreshIndexStatusAsync()
+    {
+        var meta = await _embeddingStore.GetMetaAsync();
+        var folder = _settings.LibraryFolderPath;
+        int folderCount = string.IsNullOrEmpty(folder) || !Directory.Exists(folder)
+            ? 0
+            : Directory.EnumerateFiles(folder, "*.epub", SearchOption.TopDirectoryOnly).Count();
+
+        if (folderCount == 0)
+        {
+            IndexStatusText.Text = "Set a library folder above first.";
+            BuildIndexButton.IsEnabled = false;
+        }
+        else
+        {
+            IndexStatusText.Text =
+                $"Indexed {meta.IndexedBookCount} of {folderCount} books · {meta.ChunkCount:N0} chunks";
+            BuildIndexButton.IsEnabled = !_indexing.IsRunning;
+        }
     }
 
     private async void ChangeFolder_Click(object sender, RoutedEventArgs e)
@@ -42,5 +75,90 @@ public sealed partial class SettingsPage : Page
     private void ClearFolder_Click(object sender, RoutedEventArgs e)
     {
         _settings.LibraryFolderPath = null;
+    }
+
+    private async void BuildIndex_Click(object sender, RoutedEventArgs e)
+    {
+        var folder = _settings.LibraryFolderPath;
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return;
+
+        var paths = Directory
+            .EnumerateFiles(folder, "*.epub", SearchOption.TopDirectoryOnly)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (paths.Count == 0) return;
+
+        _indexCts = new CancellationTokenSource();
+        BuildIndexButton.Visibility = Visibility.Collapsed;
+        CancelIndexButton.Visibility = Visibility.Visible;
+        IndexProgressBar.Visibility = Visibility.Visible;
+        IndexProgressText.Visibility = Visibility.Visible;
+        IndexProgressBar.IsIndeterminate = true;
+        IndexProgressText.Text = "Preparing AI model (one-time download on first build)…";
+
+        var downloadProgress = new Progress<DownloadProgress>(p =>
+        {
+            if (p.TotalBytes > 0)
+            {
+                IndexProgressBar.IsIndeterminate = false;
+                IndexProgressBar.Maximum = p.TotalBytes;
+                IndexProgressBar.Value = p.BytesDone;
+                IndexProgressText.Text =
+                    $"Downloading {p.FileName}: {FormatBytes(p.BytesDone)} of {FormatBytes(p.TotalBytes)}";
+            }
+        });
+        var indexProgress = new Progress<IndexProgress>(p =>
+        {
+            if (p.LastError is not null)
+            {
+                IndexProgressText.Text = $"Skipped {p.CurrentBookTitle}: {p.LastError}";
+                return;
+            }
+            IndexProgressBar.IsIndeterminate = p.ChunksTotal == 0;
+            if (p.ChunksTotal > 0)
+            {
+                IndexProgressBar.Maximum = p.ChunksTotal;
+                IndexProgressBar.Value = p.ChunksDone;
+            }
+            IndexProgressText.Text = p.ChunksTotal > 0
+                ? $"{p.CurrentBookTitle} (book {p.BookOrdinal + 1}/{p.BookCount}) — chunk {p.ChunksDone}/{p.ChunksTotal}"
+                : $"{p.CurrentBookTitle} (book {p.BookOrdinal + 1}/{p.BookCount}) — extracting…";
+        });
+
+        try
+        {
+            await _embedder.EnsureReadyAsync(downloadProgress, _indexCts.Token);
+            IndexProgressBar.IsIndeterminate = true;
+            IndexProgressText.Text = "Starting index build…";
+            await _indexing.BuildAllAsync(paths, indexProgress, _indexCts.Token);
+            IndexProgressText.Text = "Index build complete.";
+        }
+        catch (OperationCanceledException)
+        {
+            IndexProgressText.Text = "Index build cancelled.";
+        }
+        catch (Exception ex)
+        {
+            IndexProgressText.Text = $"Index build failed: {ex.Message}";
+        }
+        finally
+        {
+            _indexCts.Dispose();
+            _indexCts = null;
+            BuildIndexButton.Visibility = Visibility.Visible;
+            CancelIndexButton.Visibility = Visibility.Collapsed;
+            IndexProgressBar.IsIndeterminate = false;
+            await RefreshIndexStatusAsync();
+        }
+    }
+
+    private void CancelIndex_Click(object sender, RoutedEventArgs e) => _indexCts?.Cancel();
+
+    private static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
     }
 }

@@ -29,9 +29,20 @@ public partial class App : Application
         services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IBookSession, BookSession>();
         services.AddSingleton<Epub.Library.ILibraryService, Epub.Library.LibraryService>();
+
+        var localFolder = Windows.Storage.ApplicationData.Current.LocalFolder.Path;
+        var dbPath = Path.Combine(localFolder, "library.db");
+        var modelDir = Path.Combine(localFolder, "models", "minilm");
+
         services.AddSingleton<Epub.Library.IPositionStore>(_ =>
-            new Epub.Library.PositionStore(
-                Path.Combine(Windows.Storage.ApplicationData.Current.LocalFolder.Path, "library.db")));
+            new Epub.Library.PositionStore(dbPath));
+
+        services.AddSingleton<Epub.Search.Embedding.MiniLmModelDownloader>(_ =>
+            new Epub.Search.Embedding.MiniLmModelDownloader(modelDir));
+        services.AddSingleton<Epub.Search.Embedding.MiniLmEmbedder>();
+        services.AddSingleton<Epub.Search.IEmbeddingStore>(_ =>
+            new Epub.Search.EmbeddingStore(dbPath));
+        services.AddSingleton<Epub.Search.IIndexingService, Epub.Search.IndexingService>();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

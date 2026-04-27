@@ -51,6 +51,55 @@
                     </Grid>
                 </Border>
             </StackPanel>
+
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Semantic search" />
+                <TextBlock
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="Build a local index of every paragraph in your library so search can find passages by meaning, not just by keyword. The first build downloads a small AI model (~90 MB) once and then runs entirely offline." />
+
+                <Border
+                    Padding="12"
+                    Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}"
+                    BorderBrush="{ThemeResource SystemControlBackgroundBaseLowBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                    <StackPanel Spacing="12">
+                        <TextBlock
+                            x:Name="IndexStatusText"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            Text="Status not loaded yet…" />
+                        <ProgressBar
+                            x:Name="IndexProgressBar"
+                            Minimum="0"
+                            Maximum="1"
+                            Visibility="Collapsed" />
+                        <TextBlock
+                            x:Name="IndexProgressText"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            TextWrapping="WrapWholeWords"
+                            Visibility="Collapsed" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button
+                                x:Name="BuildIndexButton"
+                                Grid.Column="1"
+                                Click="BuildIndex_Click"
+                                Content="Build index" />
+                            <Button
+                                x:Name="CancelIndexButton"
+                                Grid.Column="2"
+                                Click="CancelIndex_Click"
+                                Content="Cancel"
+                                Visibility="Collapsed" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </Page>
