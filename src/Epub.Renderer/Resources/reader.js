@@ -7,15 +7,6 @@
     var IMG_VERTICAL_SLACK = 60; // extra px to cap image height by, so ancestor wrapper margins don't push the image past column height
     var GAP = SIDE_MARGIN * 2;   // column-gap absorbs the would-be padding without leaking
 
-    // Block-tag list MUST match Epub.Search.SpineTextExtractor.BlockTags exactly.
-    // Both walkers (this one and the C# extractor) emit a single '\n' on the close
-    // of these elements; any divergence breaks search-result navigation alignment.
-    var BLOCK_TAGS = {
-        'p': 1, 'div': 1, 'h1': 1, 'h2': 1, 'h3': 1, 'h4': 1, 'h5': 1, 'h6': 1,
-        'li': 1, 'blockquote': 1, 'pre': 1, 'td': 1, 'th': 1, 'tr': 1, 'br': 1,
-        'section': 1, 'article': 1, 'aside': 1, 'figure': 1, 'figcaption': 1, 'hr': 1
-    };
-
     var css = [
         'html, body { width: 100%; height: 100%; margin: 0 !important; padding: 0 !important; overflow: hidden !important; touch-action: manipulation; }',
         '#' + WRAPPER_ID + ' {',
@@ -47,6 +38,12 @@
         currentPage: 0,
         pageCount: 1,
         wrapper: null,
+        // Cached search-hit target. Populated by the #__find_ hash branch and
+        // re-resolved on every recomputeAndShow so that image-loading reflows
+        // (which shrink the chapter from N pages to M) don't strand us on the
+        // wrong page. Cleared on user navigation so a later window resize
+        // doesn't snap them back.
+        lastFindHit: null,
 
         init: function () {
             var style = document.createElement('style');
@@ -151,7 +148,40 @@
 
         recomputeAndShow: function () {
             this.recompute();
-            this.goToPage(this.currentPage);
+            var targetPage = this.currentPage;
+            if (this.lastFindHit) {
+                var resolved = this._pageForCachedHit();
+                if (resolved !== null) targetPage = resolved;
+            }
+            this.goToPage(targetPage);
+        },
+
+        _pageForCachedHit: function () {
+            if (!this.lastFindHit || !this.wrapper) return null;
+            try {
+                var hit = this.lastFindHit;
+                var rect;
+                if (hit.localOffset !== undefined) {
+                    // Text-node hit (search-result path) — use a Range for pixel-precise
+                    // x even when the matched text is inside an inline element wrapping
+                    // across a column boundary.
+                    var len = (hit.node.nodeValue || '').length;
+                    if (len === 0) return null;
+                    var off = Math.max(0, Math.min(hit.localOffset, len - 1));
+                    var range = document.createRange();
+                    range.setStart(hit.node, off);
+                    range.setEnd(hit.node, Math.min(off + 1, len));
+                    rect = range.getBoundingClientRect();
+                } else {
+                    // Element hit (TOC #element-id path) — direct bounding rect.
+                    rect = hit.node.getBoundingClientRect();
+                }
+                if (rect.width === 0 && rect.height === 0) return null;
+                var wrect = this.wrapper.getBoundingClientRect();
+                var x = rect.left - wrect.left;
+                var stride = this.wrapper.clientWidth + GAP;
+                return Math.max(0, Math.min(Math.floor((x + 4) / stride), this.pageCount - 1));
+            } catch (e) { return null; }
         },
 
         pageForInitialHash: function (hash) {
@@ -164,96 +194,190 @@
                 var p = parseInt(pageMatch[1], 10);
                 return Math.max(0, Math.min(p, this.pageCount - 1));
             }
-            // Search-hit char-offset anchor — walk text nodes accumulating lengths
-            // (with '\n' for block closes, mirroring SpineTextExtractor) until we
-            // pass the target, then compute the column-page from the parent
-            // element's bounding rect.
-            var offsetMatch = hash.match(/^#__offset_(\d+)$/);
-            if (offsetMatch) {
-                var target = parseInt(offsetMatch[1], 10);
-                var found = this.findNodeAtOffset(target);
-                if (!found || !this.wrapper) return 0;
-                var orect = found.element.getBoundingClientRect();
-                var owrect = this.wrapper.getBoundingClientRect();
-                var ox = orect.left - owrect.left;
-                var ostride = this.wrapper.clientWidth + GAP;
-                return Math.max(0, Math.min(Math.floor((ox + 4) / ostride), this.pageCount - 1));
+            // Search-hit text probe — walk text nodes in the rendered DOM and
+            // locate the first one containing the probe text, cache the hit so
+            // recomputeAndShow can re-resolve after image-loading reflows, then
+            // compute the column-page from a Range built at the matched position
+            // (precise even when matched text is inside an inline element that
+            // wraps across a column boundary).
+            var findMatch = hash.match(/^#__find_(.+)$/);
+            if (findMatch) {
+                var probe;
+                try { probe = decodeURIComponent(findMatch[1]); }
+                catch (e) { probe = ''; }
+                var hit = this.findTextNodeContaining(probe);
+                if (!hit || !this.wrapper) return 0;
+                this.lastFindHit = hit;
+                var p = this._pageForCachedHit();
+                return p !== null ? p : 0;
             }
-            // Element-id anchor — find element, compute which page contains it.
+            // Element-id anchor — find element, cache it for re-resolution after
+            // image-loading reflows (same trick as the search-hit path), and compute
+            // the initial page from its bounding rect.
             try {
                 var id = decodeURIComponent(hash.substring(1));
                 var el = document.getElementById(id);
                 if (!el || !this.wrapper) return 0;
-
-                // getBoundingClientRect forces a layout flush so positions are fresh, then
-                // gives the element's viewport-x relative to wrapper's current viewport-x.
-                // (Wrapper has no transform applied yet — this runs in init before goToPage.)
-                var rect = el.getBoundingClientRect();
-                var wrect = this.wrapper.getBoundingClientRect();
-                var x = rect.left - wrect.left;
-                var stride = this.wrapper.clientWidth + GAP;
-                // Small tolerance for subpixel column-boundary rounding.
-                return Math.max(0, Math.min(Math.floor((x + 4) / stride), this.pageCount - 1));
+                this.lastFindHit = { node: el };
+                var p = this._pageForCachedHit();
+                return p !== null ? p : 0;
             } catch (e) { /* malformed hash */ }
             return 0;
         },
 
-        // Walks the wrapper subtree accumulating text-node lengths plus a '\n' for
-        // each closing block-level element. Skips script/style/comment subtrees
-        // entirely. Stops when the running total crosses `target`, returning the
-        // text node's parent element and the offset within the matched node.
-        // Contract MUST match Epub.Search.SpineTextExtractor.
-        findNodeAtOffset: function (target) {
-            if (!this.wrapper) return null;
-            var state = { offset: 0, found: null };
-            this._walkForOffset(this.wrapper, target, state);
-            return state.found;
+        // Locate the first VISIBLE position in the rendered DOM that contains the
+        // probe text. Returns { node, localOffset } so the caller can build a Range
+        // for a pixel-precise rect. Tries three matching strategies in order:
+        //   1. literal substring match
+        //   2. whitespace-collapsed match (one space for any whitespace run)
+        //   3. whitespace-stripped match (drop all whitespace on both sides)
+        // and within each, walks every match position and returns the first whose
+        // Range has a visible rect (skips display:none / hidden text). Posts a
+        // diagnostic message either way so failures are debuggable.
+        findTextNodeContaining: function (probe) {
+            if (!this.wrapper || !probe) {
+                post({ type: 'searchHitDebug', stage: 'no-input', probeLen: (probe || '').length });
+                return null;
+            }
+
+            var walker = document.createTreeWalker(
+                this.wrapper,
+                NodeFilter.SHOW_TEXT,
+                {
+                    acceptNode: function (n) {
+                        var p = n.parentNode;
+                        while (p && p !== Reader.wrapper) {
+                            var t = (p.localName || '').toLowerCase();
+                            if (t === 'script' || t === 'style') return NodeFilter.FILTER_REJECT;
+                            p = p.parentNode;
+                        }
+                        return NodeFilter.FILTER_ACCEPT;
+                    }
+                }
+            );
+
+            var nodes = [];
+            var concat = '';
+            var node;
+            while ((node = walker.nextNode())) {
+                nodes.push({ node: node, start: concat.length });
+                concat += node.nodeValue || '';
+            }
+
+            var self = this;
+            var mapIdxToHit = function (idx) {
+                for (var i = 0; i < nodes.length; i++) {
+                    var s = nodes[i].start;
+                    var e = s + (nodes[i].node.nodeValue || '').length;
+                    if (s <= idx && idx < e) return { node: nodes[i].node, localOffset: idx - s };
+                }
+                return null;
+            };
+            var firstVisibleMatch = function (text, search) {
+                var start = 0;
+                while (start <= text.length - search.length) {
+                    var i = text.indexOf(search, start);
+                    if (i < 0) return null;
+                    var hit = mapIdxToHit(i);
+                    if (hit && self._isHitVisible(hit)) return { hit: hit, idx: i };
+                    start = i + 1;
+                }
+                return null;
+            };
+
+            // Stage 1: literal
+            var match = firstVisibleMatch(concat, probe);
+            if (match) {
+                post({ type: 'searchHitDebug', stage: 'literal', idx: match.idx, probeLen: probe.length });
+                return match.hit;
+            }
+
+            // Stage 2: collapse whitespace (insert single space for any run)
+            var collapseMap = function (s) {
+                var out = '', map = [], lastSpace = false;
+                for (var k = 0; k < s.length; k++) {
+                    var c = s.charCodeAt(k);
+                    var isSp = c === 32 || c === 9 || c === 10 || c === 13;
+                    if (isSp) {
+                        if (!lastSpace) { out += ' '; map.push(k); }
+                        lastSpace = true;
+                    } else {
+                        out += s.charAt(k);
+                        map.push(k);
+                        lastSpace = false;
+                    }
+                }
+                return { out: out, map: map };
+            };
+            var nProbeC = collapseMap(probe).out.replace(/^ | $/g, '');
+            var nConcat = collapseMap(concat);
+            if (nProbeC.length > 0) {
+                var nMatch = firstVisibleMatchMapped(nConcat, nProbeC);
+                if (nMatch) {
+                    post({ type: 'searchHitDebug', stage: 'collapsed', idx: nMatch.idx, probeLen: probe.length });
+                    return nMatch.hit;
+                }
+            }
+
+            // Stage 3: strip ALL whitespace (most aggressive)
+            var stripMap = function (s) {
+                var out = '', map = [];
+                for (var k = 0; k < s.length; k++) {
+                    var c = s.charCodeAt(k);
+                    if (c !== 32 && c !== 9 && c !== 10 && c !== 13) {
+                        out += s.charAt(k);
+                        map.push(k);
+                    }
+                }
+                return { out: out, map: map };
+            };
+            var sProbe = stripMap(probe).out;
+            var sConcat = stripMap(concat);
+            if (sProbe.length > 0) {
+                var sMatch = firstVisibleMatchMapped(sConcat, sProbe);
+                if (sMatch) {
+                    post({ type: 'searchHitDebug', stage: 'stripped', idx: sMatch.idx, probeLen: probe.length });
+                    return sMatch.hit;
+                }
+            }
+
+            post({
+                type: 'searchHitDebug',
+                stage: 'not-found',
+                probeLen: probe.length,
+                concatLen: concat.length,
+                probePrefix: probe.substring(0, 60),
+                concatPrefix: concat.substring(0, 120).replace(/\s+/g, ' ')
+            });
+            return null;
+
+            // Inner helper: same as firstVisibleMatch but operates on a mapped
+            // (transformed) string, mapping the hit-index back to a real concat index.
+            function firstVisibleMatchMapped(transformed, search) {
+                var start = 0;
+                while (start <= transformed.out.length - search.length) {
+                    var i = transformed.out.indexOf(search, start);
+                    if (i < 0) return null;
+                    var realIdx = transformed.map[i];
+                    var hit = mapIdxToHit(realIdx);
+                    if (hit && self._isHitVisible(hit)) return { hit: hit, idx: realIdx };
+                    start = i + 1;
+                }
+                return null;
+            }
         },
 
-        _walkForOffset: function (node, target, state) {
-            if (state.found) return;
-
-            var nt = node.nodeType;
-            if (nt === 3 /* TEXT_NODE */) {
-                var len = (node.nodeValue || '').length;
-                if (state.offset + len > target) {
-                    state.found = {
-                        element: node.parentElement || node.parentNode,
-                        localOffset: target - state.offset
-                    };
-                }
-                state.offset += len;
-                return;
-            }
-            if (nt === 8 /* COMMENT_NODE */) return;
-
-            if (nt !== 1 /* ELEMENT_NODE */) {
-                var kids = node.childNodes;
-                for (var i = 0; i < kids.length; i++) {
-                    this._walkForOffset(kids[i], target, state);
-                    if (state.found) return;
-                }
-                return;
-            }
-
-            var tag = (node.localName || '').toLowerCase();
-            if (tag === 'script' || tag === 'style') return;
-
-            var children = node.childNodes;
-            for (var j = 0; j < children.length; j++) {
-                this._walkForOffset(children[j], target, state);
-                if (state.found) return;
-            }
-
-            if (BLOCK_TAGS[tag]) {
-                // Block close emits '\n'. If target lands exactly on this '\n',
-                // resolve to the block element itself (rare; only happens for
-                // empty-paragraph offsets that the chunker shouldn't emit anyway).
-                if (state.offset === target) {
-                    state.found = { element: node, localOffset: 0 };
-                }
-                state.offset += 1;
-            }
+        _isHitVisible: function (hit) {
+            try {
+                var len = (hit.node.nodeValue || '').length;
+                if (len === 0) return false;
+                var range = document.createRange();
+                var startOff = Math.max(0, Math.min(hit.localOffset, len - 1));
+                range.setStart(hit.node, startOff);
+                range.setEnd(hit.node, Math.min(startOff + 1, len));
+                var rect = range.getBoundingClientRect();
+                return rect.width > 0 || rect.height > 0;
+            } catch (e) { return false; }
         },
 
         recompute: function () {
@@ -276,6 +400,7 @@
         },
 
         nextPage: function () {
+            this.lastFindHit = null;
             if (this.currentPage < this.pageCount - 1) {
                 this.goToPage(this.currentPage + 1);
                 return true;
@@ -285,6 +410,7 @@
         },
 
         prevPage: function () {
+            this.lastFindHit = null;
             if (this.currentPage > 0) {
                 this.goToPage(this.currentPage - 1);
                 return true;

@@ -46,11 +46,11 @@ public sealed partial class ReaderPage : Page
             // Snapshot every pending field together so a slow Open doesn't race a new
             // search-result navigation that arrives mid-flight.
             var pendingSpine = _session.PendingSpineIndex;
-            var pendingCharOffset = _session.PendingCharOffset;
+            var pendingProbe = _session.PendingProbeText;
             _session.PendingBookPath = null;
             _session.PendingSpineIndex = null;
-            _session.PendingCharOffset = null;
-            await OpenAsync(path, pendingSpine, pendingCharOffset);
+            _session.PendingProbeText = null;
+            await OpenAsync(path, pendingSpine, pendingProbe);
         }
     }
 
@@ -60,7 +60,7 @@ public sealed partial class ReaderPage : Page
         (App.Current.MainWindow as MainWindow)?.SetTitleBarTitle(null);
     }
 
-    private async Task OpenAsync(string path, int? pendingSpineIndex = null, int? pendingCharOffset = null)
+    private async Task OpenAsync(string path, int? pendingSpineIndex = null, string? pendingProbeText = null)
     {
         var reader = await EpubReader.OpenAsync(path);
 
@@ -72,15 +72,15 @@ public sealed partial class ReaderPage : Page
         EmptyState.Visibility = Visibility.Collapsed;
         ReaderControl.Visibility = Visibility.Visible;
 
-        if (pendingCharOffset is { } charOffset)
+        if (!string.IsNullOrWhiteSpace(pendingProbeText))
         {
-            // Search-result hand-off — land at the matching paragraph rather than
+            // Search-result hand-off — land at the matching passage rather than
             // the last-read position. The position store still gets updated as
             // soon as the user turns a page (see SchedulePositionSave).
-            await ReaderControl.LoadBookAtOffsetAsync(
+            await ReaderControl.LoadBookAtTextAsync(
                 reader,
                 initialSpineIndex: pendingSpineIndex ?? 0,
-                initialCharOffset: charOffset);
+                probeText: pendingProbeText);
         }
         else
         {

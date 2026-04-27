@@ -122,7 +122,7 @@ public sealed partial class SearchPage : Page
 
         _session.PendingBookPath = item.BookPath;
         _session.PendingSpineIndex = item.SpineIdx;
-        _session.PendingCharOffset = item.CharOffset;
+        _session.PendingProbeText = item.ProbeText;
         (App.Current.MainWindow as MainWindow)?.NavigateToReaderTab();
     }
 }
@@ -134,7 +134,7 @@ public sealed class SearchResultItem
     public string Subtitle { get; }
     public string BookPath { get; }
     public int SpineIdx { get; }
-    public int CharOffset { get; }
+    public string ProbeText { get; }
 
     public SearchResultItem(SearchHit hit)
     {
@@ -143,6 +143,6 @@ public sealed class SearchResultItem
         Subtitle = $"Chapter {hit.SpineIdx + 1} · similarity {hit.Similarity:F2}";
         BookPath = hit.BookPath;
         SpineIdx = hit.SpineIdx;
-        CharOffset = hit.CharOffset;
+        ProbeText = hit.Snippet;
     }
 }

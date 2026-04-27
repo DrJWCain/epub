@@ -49,12 +49,13 @@ public sealed partial class ReaderControl : UserControl
     }
 
     /// <summary>
-    /// Open a book at a specific character offset within a spine item — used by
-    /// search hits to land on the matching paragraph. Mirrors the offset contract
-    /// established by <c>Epub.Search.SpineTextExtractor</c>: the JS-side walker in
-    /// reader.js counts text-node lengths plus a '\n' on every block-element close.
+    /// Open a book at the first occurrence of <paramref name="probeText"/> within
+    /// the given spine item — used by search hits to land on the matching paragraph.
+    /// Pass the chunk's snippet (or any unique substring of its text); reader.js
+    /// walks the rendered DOM and finds the matching text node directly, bypassing
+    /// any offset alignment between the C# extractor and Chromium's parser.
     /// </summary>
-    public async Task LoadBookAtOffsetAsync(EpubReader reader, int initialSpineIndex, int initialCharOffset)
+    public async Task LoadBookAtTextAsync(EpubReader reader, int initialSpineIndex, string probeText)
     {
         _epubReader = reader;
         CurrentSpineIndex = -1;
@@ -63,8 +64,21 @@ public sealed partial class ReaderControl : UserControl
         await EnsureWebViewReadyAsync();
 
         var spine = Math.Clamp(initialSpineIndex, 0, Math.Max(0, reader.Book.Spine.Count - 1));
-        var hash = $"#__offset_{Math.Max(0, initialCharOffset)}";
+        var clean = CleanProbe(probeText);
+        var hash = string.IsNullOrEmpty(clean) ? null : $"#__find_{Uri.EscapeDataString(clean)}";
         ShowSpineItem(spine, hash);
+    }
+
+    private static string CleanProbe(string probe)
+    {
+        if (string.IsNullOrWhiteSpace(probe)) return string.Empty;
+        // Strip the trailing ellipsis that EmbeddingStore.Snippet appends when truncating
+        // mid-paragraph; the rendered DOM doesn't have it and indexOf would miss.
+        var trimmed = probe.TrimEnd('…', '.', ' ', '\t', '\n', '\r').Trim();
+        // The C# extractor synthesises '\n' on block close; the rendered DOM does not.
+        // Normalise to single spaces so reader.js's whitespace-tolerant search has the
+        // best chance of matching across publisher quirks.
+        return trimmed.Replace('\n', ' ').Replace('\r', ' ').Trim();
     }
 
     /// <summary>Advance one page; spills into the next chapter at end of current.</summary>
@@ -193,6 +207,10 @@ public sealed partial class ReaderControl : UserControl
                     Debug.WriteLine("[ReaderControl] startOfChapter — going back to previous spine item, last page");
                     if (CanGoPrevChapter)
                         ShowSpineItem(CurrentSpineIndex - 1, hashFragment: "#__last_page");
+                    break;
+
+                case "searchHitDebug":
+                    Debug.WriteLine($"[ReaderControl] search-hit walker: {doc.RootElement.GetRawText()}");
                     break;
             }
         }
