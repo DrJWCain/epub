@@ -77,6 +77,37 @@ public sealed partial class SettingsPage : Page
                 ? $"{coordinatorStatus} (auto) · indexed {meta.IndexedBookCount} of {folderCount} books"
                 : $"Indexed {meta.IndexedBookCount} of {folderCount} books · {meta.ChunkCount:N0} chunks";
             BuildIndexButton.IsEnabled = !_indexing.IsRunning;
+
+            // Mirror auto-coordinator state into the progress UI when there's no
+            // manual Build in flight (BuildIndex_Click owns it during manual mode).
+            if (_indexCts is null)
+            {
+                if (coordinatorStatus is not null)
+                {
+                    IndexProgressBar.Visibility = Visibility.Visible;
+                    IndexProgressText.Visibility = Visibility.Visible;
+                    IndexProgressText.Text = coordinatorStatus;
+                    var progress = _coordinator.CurrentProgress;
+                    if (progress is { ChunksTotal: > 0 } p)
+                    {
+                        IndexProgressBar.IsIndeterminate = false;
+                        IndexProgressBar.Maximum = p.ChunksTotal;
+                        IndexProgressBar.Value = p.ChunksDone;
+                    }
+                    else
+                    {
+                        IndexProgressBar.IsIndeterminate = true;
+                        IndexProgressBar.Value = 0;
+                    }
+                }
+                else
+                {
+                    IndexProgressBar.Visibility = Visibility.Collapsed;
+                    IndexProgressText.Visibility = Visibility.Collapsed;
+                    IndexProgressBar.IsIndeterminate = false;
+                    IndexProgressBar.Value = 0;
+                }
+            }
         }
     }
 

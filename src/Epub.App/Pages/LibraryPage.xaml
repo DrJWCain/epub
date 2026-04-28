@@ -32,13 +32,23 @@
                     Text="" />
             </AppBarElementContainer>
             <AppBarElementContainer VerticalAlignment="Center" Visibility="Collapsed" x:Name="IndexingStatusContainer">
-                <TextBlock
-                    x:Name="IndexingStatusLabel"
-                    Padding="8,0"
-                    VerticalAlignment="Center"
-                    Style="{StaticResource CaptionTextBlockStyle}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="" />
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Spacing="8">
+                    <TextBlock
+                        x:Name="IndexingStatusLabel"
+                        Padding="8,0,0,0"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="" />
+                    <ProgressBar
+                        x:Name="IndexingProgressBar"
+                        Width="120"
+                        VerticalAlignment="Center"
+                        IsIndeterminate="True"
+                        Minimum="0"
+                        Maximum="1"
+                        Value="0" />
+                </StackPanel>
             </AppBarElementContainer>
         </CommandBar>
 

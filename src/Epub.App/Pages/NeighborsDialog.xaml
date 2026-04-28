@@ -43,6 +43,11 @@
             IsItemClickEnabled="True"
             ItemClick="Result_Click"
             SelectionMode="None">
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+            </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="local:NeighborItem">
                     <StackPanel Padding="0,8,0,8" Spacing="4">

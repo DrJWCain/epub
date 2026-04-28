@@ -49,6 +49,19 @@ public sealed partial class LibraryPage : Page
         IndexingStatusContainer.Visibility = string.IsNullOrEmpty(status)
             ? Visibility.Collapsed
             : Visibility.Visible;
+
+        var progress = _indexingCoordinator.CurrentProgress;
+        if (progress is { ChunksTotal: > 0 } p)
+        {
+            IndexingProgressBar.IsIndeterminate = false;
+            IndexingProgressBar.Maximum = p.ChunksTotal;
+            IndexingProgressBar.Value = p.ChunksDone;
+        }
+        else
+        {
+            IndexingProgressBar.IsIndeterminate = true;
+            IndexingProgressBar.Value = 0;
+        }
     }
 
     private async Task LoadLibraryAsync()

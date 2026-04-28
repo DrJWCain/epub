@@ -2,6 +2,7 @@ using System.Threading.Channels;
 using Epub.Library;
 using Epub.Search;
 using Epub.Search.Embedding;
+using IndexProgress = Epub.Search.IndexProgress;
 
 namespace Epub_App.Services;
 
@@ -25,6 +26,10 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
 
     public event EventHandler<string?>? StatusChanged;
     public string? CurrentStatus { get; private set; }
+
+    /// <summary>Per-chunk progress for the book currently being indexed, or null
+    /// when idle. Updated alongside <see cref="CurrentStatus"/>.</summary>
+    public IndexProgress? CurrentProgress { get; private set; }
 
     public IndexingBackgroundCoordinator(
         ILibraryService library,
@@ -97,8 +102,17 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
                 }
 
                 var title = Path.GetFileNameWithoutExtension(path);
+                CurrentProgress = null;
                 SetStatus($"Indexing '{title}'…");
-                await _indexing.IndexBookAsync(path, progress: null, ct).ConfigureAwait(false);
+                var progress = new Progress<IndexProgress>(p =>
+                {
+                    CurrentProgress = p;
+                    SetStatus(p.ChunksTotal > 0
+                        ? $"Indexing '{title}' — chunk {p.ChunksDone}/{p.ChunksTotal}"
+                        : $"Indexing '{title}'…");
+                });
+                await _indexing.IndexBookAsync(path, progress, ct).ConfigureAwait(false);
+                CurrentProgress = null;
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
@@ -107,14 +121,20 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
                     $"[IndexingBackgroundCoordinator] book {Path.GetFileName(path)} failed: {ex.GetType().Name}: {ex.Message}");
             }
 
-            if (_queue.Reader.Count == 0) SetStatus(null);
+            if (_queue.Reader.Count == 0)
+            {
+                CurrentProgress = null;
+                SetStatus(null);
+            }
         }
+        CurrentProgress = null;
         SetStatus(null);
     }
 
     private void SetStatus(string? status)
     {
-        if (string.Equals(CurrentStatus, status, StringComparison.Ordinal)) return;
+        // Don't short-circuit on equal strings — chunk-progress callers want the
+        // event to fire so the UI can read CurrentProgress for the bar.
         CurrentStatus = status;
         StatusChanged?.Invoke(this, status);
     }
