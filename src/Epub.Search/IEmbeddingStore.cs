@@ -66,7 +66,20 @@ public interface IEmbeddingStore
     Task UpdateClusterLabelsAsync(
         IReadOnlyDictionary<long, string> labels,
         CancellationToken ct = default);
+
+    /// <summary>Persist a generated concept thread. Returns the new row id.</summary>
+    Task<long> SaveThreadAsync(string query, string passagesJson, CancellationToken ct = default);
+
+    /// <summary>List saved threads newest-first.</summary>
+    Task<IReadOnlyList<SavedThreadSummary>> ListThreadsAsync(CancellationToken ct = default);
+
+    /// <summary>Load a thread's serialized passage list. Null if the id is gone.</summary>
+    Task<string?> GetThreadJsonAsync(long id, CancellationToken ct = default);
+
+    Task DeleteThreadAsync(long id, CancellationToken ct = default);
 }
+
+public sealed record SavedThreadSummary(long Id, string Query, DateTimeOffset CreatedAt);
 
 public sealed record ClusterRow(
     long Id,

@@ -15,7 +15,71 @@
         </Grid.RowDefinitions>
 
         <StackPanel Grid.Row="0" Padding="24,16,24,8" Spacing="10">
-            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Threads" />
+            <Grid ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="0" Style="{StaticResource TitleTextBlockStyle}" Text="Threads" />
+                <DropDownButton x:Name="SavedButton" Grid.Column="1" Content="Saved" VerticalAlignment="Center">
+                    <DropDownButton.Flyout>
+                        <Flyout x:Name="SavedFlyout" Opening="SavedFlyout_Opening">
+                            <Grid Width="380" MaxHeight="480">
+                                <ListView
+                                    x:Name="SavedList"
+                                    IsItemClickEnabled="True"
+                                    ItemClick="SavedList_ItemClick"
+                                    SelectionMode="None">
+                                    <ListView.ItemContainerStyle>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        </Style>
+                                    </ListView.ItemContainerStyle>
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="local:SavedThreadItem">
+                                            <Grid Padding="0,4,0,4" ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0" Spacing="2">
+                                                    <TextBlock
+                                                        Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                        Text="{x:Bind Query}"
+                                                        TextTrimming="CharacterEllipsis"
+                                                        TextWrapping="WrapWholeWords"
+                                                        MaxLines="2" />
+                                                    <TextBlock
+                                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                                        Text="{x:Bind CreatedDisplay}" />
+                                                </StackPanel>
+                                                <Button
+                                                    Grid.Column="1"
+                                                    VerticalAlignment="Center"
+                                                    Content="✕"
+                                                    Padding="4,2,4,2"
+                                                    FontSize="11"
+                                                    Click="DeleteSaved_Click"
+                                                    Tag="{x:Bind Id}" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                                <TextBlock
+                                    x:Name="SavedEmptyState"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Text="No saved threads yet — generate one and it'll be saved automatically."
+                                    TextWrapping="WrapWholeWords"
+                                    Visibility="Collapsed" />
+                            </Grid>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+            </Grid>
             <TextBlock
                 Style="{StaticResource BodyTextBlockStyle}"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"

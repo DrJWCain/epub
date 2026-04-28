@@ -34,6 +34,34 @@ public sealed class ConceptThreadService
         _generator = generator;
     }
 
+    public Task<long> SaveAsync(ConceptThread thread, CancellationToken ct = default)
+    {
+        var json = JsonSerializer.Serialize(thread.Steps, JsonOptions);
+        return _store.SaveThreadAsync(thread.Query, json, ct);
+    }
+
+    public Task<IReadOnlyList<SavedThreadSummary>> ListSavedAsync(CancellationToken ct = default)
+        => _store.ListThreadsAsync(ct);
+
+    public async Task<ConceptThread?> LoadSavedAsync(long id, CancellationToken ct = default)
+    {
+        var json = await _store.GetThreadJsonAsync(id, ct).ConfigureAwait(false);
+        if (json is null) return null;
+        var summary = (await _store.ListThreadsAsync(ct).ConfigureAwait(false))
+            .FirstOrDefault(s => s.Id == id);
+        if (summary is null) return null;
+        IReadOnlyList<ConceptThreadStep>? steps;
+        try
+        {
+            steps = JsonSerializer.Deserialize<IReadOnlyList<ConceptThreadStep>>(json, JsonOptions);
+        }
+        catch (JsonException) { return null; }
+        return steps is null ? null : new ConceptThread(summary.Query, steps, string.Empty);
+    }
+
+    public Task DeleteSavedAsync(long id, CancellationToken ct = default)
+        => _store.DeleteThreadAsync(id, ct);
+
     public async Task<ConceptThread> GenerateAsync(
         string query,
         int targetLength,

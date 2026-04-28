@@ -94,15 +94,48 @@ public sealed partial class ThreadPage : Page
         EmptyState.Visibility = Visibility.Collapsed;
 
         var progress = new Progress<ThreadProgress>(p => StatusLabel.Text = p.Phase);
+
+        // Estimate the LLM's output length so we can drive a determinate
+        // progress bar + give the user a sense of "how much further?"
+        // Each step is ~30 tokens (id + transition + JSON punctuation),
+        // plus ~50 tokens of wrapping JSON structure.
+        var estimatedTotalTokens = length * 30 + 50;
         int tokenCount = 0;
-        Action<string> onToken = _ => ++tokenCount;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var lastUiTick = System.Diagnostics.Stopwatch.StartNew();
+        bool generationStarted = false;
+
+        Action<string> onToken = _ =>
+        {
+            tokenCount++;
+            // Throttle UI updates to ~4/sec — token rate is 5-15/sec on ARM64
+            // CPU, but updating ProgressBar + TextBlock per token still adds
+            // up enough to be worth batching.
+            if (lastUiTick.ElapsedMilliseconds < 250) return;
+            lastUiTick.Restart();
+            int captured = tokenCount;
+            double elapsed = sw.Elapsed.TotalSeconds;
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!generationStarted)
+                {
+                    generationStarted = true;
+                    ProgressBar.IsIndeterminate = false;
+                    ProgressBar.Maximum = estimatedTotalTokens;
+                }
+                ProgressBar.Value = Math.Min(captured, estimatedTotalTokens);
+                var tps = captured / Math.Max(elapsed, 0.1);
+                var remainingSec = Math.Max(0, (estimatedTotalTokens - captured) / Math.Max(tps, 0.1));
+                StatusLabel.Text = remainingSec > 1
+                    ? $"Generating thread… {captured} tokens · {tps:F1}/s · ~{FormatRemaining(remainingSec)} remaining"
+                    : $"Generating thread… {captured} tokens · {tps:F1}/s · finishing up";
+            });
+        };
 
         try
         {
             var thread = await _threadService.GenerateAsync(
-                query, length, progress,
-                onToken: t => { tokenCount++; },
-                _generateCts.Token);
+                query, length, progress, onToken, _generateCts.Token);
 
             if (thread.Steps.Count == 0)
             {
@@ -112,7 +145,15 @@ public sealed partial class ThreadPage : Page
             else
             {
                 RenderThread(thread);
-                StatusLabel.Text = $"{thread.Steps.Count} passages · {tokenCount} tokens generated";
+                // Auto-save successful threads — they're expensive to regenerate
+                // and the Saved menu has a delete action for any the user doesn't
+                // want to keep.
+                try { await _threadService.SaveAsync(thread, _generateCts.Token); }
+                catch (Exception saveEx)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[ThreadPage] save failed: {saveEx}");
+                }
+                StatusLabel.Text = $"{thread.Steps.Count} passages · {tokenCount} tokens generated · saved";
             }
         }
         catch (OperationCanceledException)
@@ -253,11 +294,82 @@ public sealed partial class ThreadPage : Page
         return card;
     }
 
+    private async void SavedFlyout_Opening(object? sender, object e)
+    {
+        var saved = await Task.Run(() => _threadService.ListSavedAsync());
+        var items = saved.Select(s => new SavedThreadItem(s)).ToList();
+        SavedList.ItemsSource = items;
+        SavedEmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        SavedList.Visibility = items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void SavedList_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is not SavedThreadItem item) return;
+        SavedFlyout.Hide();
+
+        SetWorkingState(true, $"Loading saved thread: {item.Query}…");
+        try
+        {
+            var thread = await Task.Run(() => _threadService.LoadSavedAsync(item.Id));
+            if (thread is null)
+            {
+                StatusLabel.Text = "Saved thread could not be loaded (data missing or corrupted).";
+                return;
+            }
+            QueryBox.Text = thread.Query;
+            RenderThread(thread);
+            StatusLabel.Text = $"Loaded saved thread · {thread.Steps.Count} passages";
+        }
+        catch (Exception ex)
+        {
+            StatusLabel.Text = $"Load failed: {ex.Message}";
+        }
+        finally
+        {
+            SetWorkingState(false);
+        }
+    }
+
+    private async void DeleteSaved_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not long id) return;
+        await Task.Run(() => _threadService.DeleteSavedAsync(id));
+        // Refresh the list within the open flyout
+        var saved = await Task.Run(() => _threadService.ListSavedAsync());
+        var items = saved.Select(s => new SavedThreadItem(s)).ToList();
+        SavedList.ItemsSource = items;
+        SavedEmptyState.Visibility = items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        SavedList.Visibility = items.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private static string FormatRemaining(double seconds)
+    {
+        if (seconds < 60) return $"{seconds:F0}s";
+        var min = (int)(seconds / 60);
+        var sec = (int)(seconds % 60);
+        return $"{min}m {sec:D2}s";
+    }
+
     private static string FormatBytes(long bytes)
     {
         if (bytes < 1024) return $"{bytes} B";
         if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
         if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         return $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+    }
+}
+
+public sealed class SavedThreadItem
+{
+    public long Id { get; }
+    public string Query { get; }
+    public string CreatedDisplay { get; }
+
+    public SavedThreadItem(SavedThreadSummary summary)
+    {
+        Id = summary.Id;
+        Query = summary.Query;
+        CreatedDisplay = summary.CreatedAt.LocalDateTime.ToString("f");
     }
 }

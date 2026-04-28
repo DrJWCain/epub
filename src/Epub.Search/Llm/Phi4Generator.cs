@@ -90,10 +90,12 @@ public sealed class Phi4Generator : IDisposable
             var lastToken = seq[seq.Length - 1];
             var fragment = stream.Decode(lastToken);
             if (!string.IsNullOrEmpty(fragment))
-            {
                 output.Append(fragment);
-                onToken?.Invoke(fragment);
-            }
+            // Always invoke onToken so callers see real per-token progress.
+            // BPE decoders frequently emit empty fragments for partial-byte
+            // tokens, so gating onToken on non-empty fragments would make
+            // the count climb erratically (or not at all for long stretches).
+            onToken?.Invoke(fragment ?? string.Empty);
         }
 
         return output.ToString().Trim();

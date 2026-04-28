@@ -394,6 +394,65 @@ public sealed class EmbeddingStore : IEmbeddingStore
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<long> SaveThreadAsync(string query, string passagesJson, CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO concept_threads(query, created_at, passages_json)
+            VALUES($q, $ts, $j)
+            RETURNING id
+            """;
+        cmd.Parameters.AddWithValue("$q", query);
+        cmd.Parameters.AddWithValue("$ts", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        cmd.Parameters.AddWithValue("$j", passagesJson);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
+    }
+
+    public async Task<IReadOnlyList<SavedThreadSummary>> ListThreadsAsync(CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        var rows = new List<SavedThreadSummary>();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT id, query, created_at FROM concept_threads ORDER BY created_at DESC, id DESC";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add(new SavedThreadSummary(
+                Id: reader.GetInt64(0),
+                Query: reader.GetString(1),
+                CreatedAt: DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2))));
+        }
+        return rows;
+    }
+
+    public async Task<string?> GetThreadJsonAsync(long id, CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT passages_json FROM concept_threads WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is string s ? s : null;
+    }
+
+    public async Task DeleteThreadAsync(long id, CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "DELETE FROM concept_threads WHERE id = $id";
+        cmd.Parameters.AddWithValue("$id", id);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<IReadOnlyList<ClusterRow>> GetClustersAsync(CancellationToken ct = default)
     {
         await EnsureSchemaAsync(ct).ConfigureAwait(false);
@@ -561,6 +620,15 @@ public sealed class EmbeddingStore : IEmbeddingStore
                     );
 
                     CREATE INDEX IF NOT EXISTS idx_chunk_clusters_cluster ON chunk_clusters(cluster_id);
+
+                    CREATE TABLE IF NOT EXISTS concept_threads (
+                        id            INTEGER PRIMARY KEY,
+                        query         TEXT NOT NULL,
+                        created_at    INTEGER NOT NULL,
+                        passages_json TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_concept_threads_created ON concept_threads(created_at DESC);
                     """;
                 await ddl.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }

@@ -15,6 +15,7 @@
     <Grid>
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="F11" Invoked="ToggleFullScreen_Invoked" />
+            <KeyboardAccelerator Key="Left" Modifiers="Menu" Invoked="GoBack_Invoked" />
         </Grid.KeyboardAccelerators>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
