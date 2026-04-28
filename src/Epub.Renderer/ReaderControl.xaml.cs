@@ -20,6 +20,10 @@ public sealed partial class ReaderControl : UserControl
     public event EventHandler? SpineChanged;
     public event EventHandler? PageChanged;
 
+    /// <summary>Fired when the user right-clicks a prose block in the reader.
+    /// Argument is the block's textContent (trimmed, capped at 800 chars).</summary>
+    public event EventHandler<string>? NeighborsRequested;
+
     public int CurrentSpineIndex { get; private set; } = -1;
     public int SpineCount => _epubReader?.Book.Spine.Count ?? 0;
     public bool CanGoPrevChapter => CurrentSpineIndex > 0;
@@ -165,6 +169,10 @@ public sealed partial class ReaderControl : UserControl
 
         WebView.CoreWebView2.Profile.PreferredColorScheme = CoreWebView2PreferredColorScheme.Light;
 
+        // Suppress Chromium's default right-click menu so our DOM contextmenu
+        // handler in reader.js owns the gesture entirely (Show neighbors).
+        WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = false;
+
         await WebView.CoreWebView2.AddScriptToExecuteOnDocumentCreatedAsync(ReaderScript);
 
         WebView.CoreWebView2.AddWebResourceRequestedFilter(
@@ -211,6 +219,13 @@ public sealed partial class ReaderControl : UserControl
 
                 case "searchHitDebug":
                     Debug.WriteLine($"[ReaderControl] search-hit walker: {doc.RootElement.GetRawText()}");
+                    break;
+
+                case "showNeighbors":
+                    var nText = doc.RootElement.GetProperty("text").GetString();
+                    Debug.WriteLine($"[ReaderControl] showNeighbors text length = {nText?.Length ?? 0}");
+                    if (!string.IsNullOrWhiteSpace(nText))
+                        NeighborsRequested?.Invoke(this, nText);
                     break;
             }
         }

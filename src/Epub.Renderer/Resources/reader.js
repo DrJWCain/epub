@@ -28,6 +28,24 @@
         '#' + WRAPPER_ID + '[id] img { display: block; max-height: calc(100vh - ' + (TOP_MARGIN * 2 + IMG_VERTICAL_SLACK) + 'px) !important; width: auto; object-fit: contain; }'
     ].join('\n');
 
+    var PROSE_BLOCK_TAGS = {
+        'p': 1, 'blockquote': 1, 'li': 1, 'pre': 1,
+        'h1': 1, 'h2': 1, 'h3': 1, 'h4': 1, 'h5': 1, 'h6': 1,
+        'td': 1, 'th': 1, 'figcaption': 1
+    };
+
+    function findEnclosingProseBlock(start) {
+        var node = start;
+        while (node && node !== document.body) {
+            if (node.nodeType === 1) {
+                var tag = (node.localName || '').toLowerCase();
+                if (PROSE_BLOCK_TAGS[tag]) return node;
+            }
+            node = node.parentNode;
+        }
+        return null;
+    }
+
     function post(msg) {
         if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
             window.chrome.webview.postMessage(msg);
@@ -91,6 +109,20 @@
             window.addEventListener('resize', function () {
                 if (resizeTimer) clearTimeout(resizeTimer);
                 resizeTimer = setTimeout(function () { Reader.recomputeAndShow(); }, 100);
+            });
+
+            // Right-click on a paragraph (or touch long-press, which Windows
+            // synthesises into a contextmenu event for free) → ask the host
+            // to show neighbors. Walk up to a paragraph-like block element
+            // and use its text as the embedding probe. Skip images / tiny
+            // snippets so page numbers and single-word labels don't trigger.
+            document.addEventListener('contextmenu', function (e) {
+                var target = findEnclosingProseBlock(e.target);
+                if (!target) return;
+                var text = (target.textContent || '').trim();
+                if (text.length < 30) return;
+                e.preventDefault();
+                post({ type: 'showNeighbors', text: text.length > 800 ? text.substring(0, 800) : text });
             });
 
             // Same-document fragment navigation: the host calls Navigate with the

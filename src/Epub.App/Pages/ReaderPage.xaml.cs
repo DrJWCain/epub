@@ -32,6 +32,23 @@ public sealed partial class ReaderPage : Page
 
         ReaderControl.PageChanged += (s, e) => { UpdateNavState(); SchedulePositionSave(); };
         ReaderControl.SpineChanged += (s, e) => UpdateNavState();
+        ReaderControl.NeighborsRequested += OnNeighborsRequested;
+    }
+
+    private async void OnNeighborsRequested(object? sender, string sourceText)
+    {
+        if (string.IsNullOrEmpty(_currentBookPath) || ReaderControl.CurrentSpineIndex < 0) return;
+
+        var dialog = new NeighborsDialog(sourceText, _currentBookPath, ReaderControl.CurrentSpineIndex)
+        {
+            XamlRoot = this.XamlRoot,
+        };
+        await dialog.ShowAsync();
+
+        if (dialog.SelectedHit is { } hit && File.Exists(hit.BookPath))
+        {
+            await OpenAsync(hit.BookPath, hit.SpineIdx, hit.Snippet);
+        }
     }
 
     protected override async void OnNavigatedTo(NavigationEventArgs e)
