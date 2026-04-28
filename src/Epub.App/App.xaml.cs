@@ -45,6 +45,12 @@ public partial class App : Application
         services.AddSingleton<Epub.Search.IIndexingService, Epub.Search.IndexingService>();
         services.AddSingleton<Epub.Search.Clustering.IClusteringService, Epub.Search.Clustering.ClusteringService>();
         services.AddSingleton<IndexingBackgroundCoordinator>();
+
+        var phi4Dir = Path.Combine(localFolder, "models", "phi4-mini");
+        services.AddSingleton<Epub.Search.Llm.Phi4ModelDownloader>(_ =>
+            new Epub.Search.Llm.Phi4ModelDownloader(phi4Dir));
+        services.AddSingleton<Epub.Search.Llm.Phi4Generator>();
+        services.AddSingleton<Epub.Search.Llm.ConceptThreadService>();
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)

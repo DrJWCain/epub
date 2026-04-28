@@ -83,6 +83,9 @@ public sealed partial class MainWindow : Window
                 case "discover":
                     NavFrame.Navigate(typeof(DiscoverPage));
                     break;
+                case "threads":
+                    NavFrame.Navigate(typeof(ThreadPage));
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown navigation item tag: {item.Tag}");
             }

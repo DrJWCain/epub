@@ -64,6 +64,11 @@
                         <FontIcon Glyph="&#xE8A9;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Threads" Tag="threads">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE82E;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <Frame x:Name="NavFrame" />
         </NavigationView>
