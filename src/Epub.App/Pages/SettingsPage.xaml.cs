@@ -4,6 +4,7 @@ using Epub_App.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using Windows.Storage.Pickers;
 
 namespace Epub_App.Pages;
@@ -14,6 +15,7 @@ public sealed partial class SettingsPage : Page
     private readonly IEmbeddingStore _embeddingStore;
     private readonly IIndexingService _indexing;
     private readonly MiniLmEmbedder _embedder;
+    private readonly IndexingBackgroundCoordinator _coordinator;
     private CancellationTokenSource? _indexCts;
 
     public SettingsPage()
@@ -24,10 +26,28 @@ public sealed partial class SettingsPage : Page
         _embeddingStore = services.GetRequiredService<IEmbeddingStore>();
         _indexing = services.GetRequiredService<IIndexingService>();
         _embedder = services.GetRequiredService<MiniLmEmbedder>();
+        _coordinator = services.GetRequiredService<IndexingBackgroundCoordinator>();
 
         _settings.Changed += (s, e) => { RefreshFolderRow(); _ = RefreshIndexStatusAsync(); };
         RefreshFolderRow();
+    }
+
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        _coordinator.StatusChanged += OnCoordinatorStatusChanged;
         _ = RefreshIndexStatusAsync();
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        base.OnNavigatedFrom(e);
+        _coordinator.StatusChanged -= OnCoordinatorStatusChanged;
+    }
+
+    private void OnCoordinatorStatusChanged(object? sender, string? status)
+    {
+        DispatcherQueue.TryEnqueue(async () => await RefreshIndexStatusAsync());
     }
 
     private void RefreshFolderRow()
@@ -52,8 +72,10 @@ public sealed partial class SettingsPage : Page
         }
         else
         {
-            IndexStatusText.Text =
-                $"Indexed {meta.IndexedBookCount} of {folderCount} books · {meta.ChunkCount:N0} chunks";
+            var coordinatorStatus = _coordinator.CurrentStatus;
+            IndexStatusText.Text = coordinatorStatus is not null
+                ? $"{coordinatorStatus} (auto) · indexed {meta.IndexedBookCount} of {folderCount} books"
+                : $"Indexed {meta.IndexedBookCount} of {folderCount} books · {meta.ChunkCount:N0} chunks";
             BuildIndexButton.IsEnabled = !_indexing.IsRunning;
         }
     }
