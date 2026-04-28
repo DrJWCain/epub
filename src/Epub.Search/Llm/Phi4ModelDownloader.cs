@@ -76,26 +76,57 @@ public sealed class Phi4ModelDownloader
         IProgress<DownloadProgress>? progress, CancellationToken ct)
     {
         var tempPath = destPath + ".part";
+        // Resume from any prior .part bytes via HTTP Range. HuggingFace's CDN
+        // honours Range requests, and Phi-4 weights are big enough that a
+        // re-start-from-zero is genuinely painful.
+        long startByte = File.Exists(tempPath) ? new FileInfo(tempPath).Length : 0;
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        if (startByte > 0)
+            request.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(startByte, null);
+
         using var response = await _http
-            .GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct)
+            .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)
             .ConfigureAwait(false);
+
+        // If the server doesn't honour the range (returns 200 instead of 206),
+        // restart from scratch.
+        if (startByte > 0 && response.StatusCode != System.Net.HttpStatusCode.PartialContent)
+        {
+            startByte = 0;
+        }
         response.EnsureSuccessStatusCode();
 
-        var totalBytes = response.Content.Headers.ContentLength ?? 0;
-        progress?.Report(new DownloadProgress(displayName, 0, totalBytes));
+        long remaining = response.Content.Headers.ContentLength ?? 0;
+        long totalBytes = startByte + remaining;
+        progress?.Report(new DownloadProgress(displayName, startByte, totalBytes));
 
+        var fileMode = startByte > 0 ? FileMode.Append : FileMode.Create;
         await using (var src = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
-        await using (var dst = File.Create(tempPath))
+        await using (var dst = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
         {
             var buffer = new byte[BufferSize];
-            long bytesDone = 0;
+            long bytesDone = startByte;
             int read;
+
+            // Throttle progress reports to ~4/sec. Without throttling, a
+            // ~4.87 GB file at 80 KB/chunk fires ~60,000 IProgress callbacks
+            // — Progress<T> hops them all to the UI sync context and the UI
+            // thread starves, looking frozen.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
             while ((read = await src.ReadAsync(buffer.AsMemory(), ct).ConfigureAwait(false)) > 0)
             {
                 await dst.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
                 bytesDone += read;
-                progress?.Report(new DownloadProgress(displayName, bytesDone, totalBytes));
+                if (sw.ElapsedMilliseconds >= 250)
+                {
+                    progress?.Report(new DownloadProgress(displayName, bytesDone, totalBytes));
+                    sw.Restart();
+                }
             }
+            // Final tick at exact total so the bar fills to 100%.
+            progress?.Report(new DownloadProgress(displayName, bytesDone, totalBytes));
         }
 
         File.Move(tempPath, destPath, overwrite: true);
