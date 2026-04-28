@@ -43,6 +43,7 @@ public partial class App : Application
         services.AddSingleton<Epub.Search.IEmbeddingStore>(_ =>
             new Epub.Search.EmbeddingStore(dbPath));
         services.AddSingleton<Epub.Search.IIndexingService, Epub.Search.IndexingService>();
+        services.AddSingleton<Epub.Search.Clustering.IClusteringService, Epub.Search.Clustering.ClusteringService>();
         services.AddSingleton<IndexingBackgroundCoordinator>();
     }
 

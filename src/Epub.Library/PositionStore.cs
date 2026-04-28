@@ -22,6 +22,7 @@ public sealed class PositionStore : IPositionStore
 
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(ct).ConfigureAwait(false);
+        await SetBusyTimeoutAsync(connection, ct).ConfigureAwait(false);
 
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = "SELECT spine_index, page_in_chapter, updated_at FROM reading_positions WHERE book_path = $path";
@@ -43,6 +44,7 @@ public sealed class PositionStore : IPositionStore
 
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(ct).ConfigureAwait(false);
+        await SetBusyTimeoutAsync(connection, ct).ConfigureAwait(false);
 
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
@@ -60,6 +62,17 @@ public sealed class PositionStore : IPositionStore
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
+    private static async Task SetBusyTimeoutAsync(SqliteConnection connection, CancellationToken ct)
+    {
+        // Block (rather than fail with SQLITE_BUSY) for up to 30 s when another
+        // connection holds the write lock — the indexer holds a per-book write
+        // transaction for tens of seconds during chunking, and a page-turn save
+        // would otherwise collide with SQLITE_BUSY.
+        await using var pragma = connection.CreateCommand();
+        pragma.CommandText = "PRAGMA busy_timeout = 30000";
+        await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
     private async Task EnsureSchemaAsync(CancellationToken ct)
     {
         if (_schemaInitialized) return;
@@ -69,6 +82,7 @@ public sealed class PositionStore : IPositionStore
             if (_schemaInitialized) return;
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(ct).ConfigureAwait(false);
+            await SetBusyTimeoutAsync(connection, ct).ConfigureAwait(false);
             await using var cmd = connection.CreateCommand();
             cmd.CommandText = """
                 CREATE TABLE IF NOT EXISTS reading_positions (

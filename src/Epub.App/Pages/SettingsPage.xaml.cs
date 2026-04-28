@@ -1,4 +1,5 @@
 using Epub.Search;
+using Epub.Search.Clustering;
 using Epub.Search.Embedding;
 using Epub_App.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,7 +17,9 @@ public sealed partial class SettingsPage : Page
     private readonly IIndexingService _indexing;
     private readonly MiniLmEmbedder _embedder;
     private readonly IndexingBackgroundCoordinator _coordinator;
+    private readonly IClusteringService _clustering;
     private CancellationTokenSource? _indexCts;
+    private CancellationTokenSource? _themesCts;
 
     public SettingsPage()
     {
@@ -27,8 +30,14 @@ public sealed partial class SettingsPage : Page
         _indexing = services.GetRequiredService<IIndexingService>();
         _embedder = services.GetRequiredService<MiniLmEmbedder>();
         _coordinator = services.GetRequiredService<IndexingBackgroundCoordinator>();
+        _clustering = services.GetRequiredService<IClusteringService>();
 
-        _settings.Changed += (s, e) => { RefreshFolderRow(); _ = RefreshIndexStatusAsync(); };
+        _settings.Changed += (s, e) =>
+        {
+            RefreshFolderRow();
+            _ = RefreshIndexStatusAsync();
+            _ = RefreshThemesStatusAsync();
+        };
         RefreshFolderRow();
     }
 
@@ -37,6 +46,7 @@ public sealed partial class SettingsPage : Page
         base.OnNavigatedTo(e);
         _coordinator.StatusChanged += OnCoordinatorStatusChanged;
         _ = RefreshIndexStatusAsync();
+        _ = RefreshThemesStatusAsync();
     }
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
@@ -206,6 +216,90 @@ public sealed partial class SettingsPage : Page
     }
 
     private void CancelIndex_Click(object sender, RoutedEventArgs e) => _indexCts?.Cancel();
+
+    private async Task RefreshThemesStatusAsync()
+    {
+        var meta = await _embeddingStore.GetMetaAsync();
+        var clusters = await _embeddingStore.GetClustersAsync();
+        if (meta.ChunkCount == 0)
+        {
+            ThemesStatusText.Text = "Build the semantic index first.";
+            BuildThemesButton.IsEnabled = false;
+        }
+        else if (clusters.Count == 0)
+        {
+            ThemesStatusText.Text = "Themes not built yet.";
+            BuildThemesButton.IsEnabled = !_clustering.IsRunning;
+        }
+        else
+        {
+            var built = clusters.Max(c => c.BuiltAt);
+            var totalChunks = clusters.Sum(c => c.ChunkCount);
+            ThemesStatusText.Text =
+                $"{clusters.Count} themes · {totalChunks:N0} passages · built {built.LocalDateTime:f}";
+            BuildThemesButton.IsEnabled = !_clustering.IsRunning;
+
+            // Quick-peek of the top-N labels (clusters are returned largest-first
+            // by GetClustersAsync). Acts as a sanity check until the Discover
+            // page (S3.2) provides a proper view.
+            var top = clusters.Take(5)
+                .Select(c => string.IsNullOrWhiteSpace(c.Label) ? $"#{c.Id}" : c.Label)
+                .ToList();
+            if (top.Count > 0)
+            {
+                ThemesSampleText.Text = "Top themes: " + string.Join("  •  ", top.Select(t => $"“{t}”"));
+                ThemesSampleText.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                ThemesSampleText.Visibility = Visibility.Collapsed;
+            }
+        }
+    }
+
+    private async void BuildThemes_Click(object sender, RoutedEventArgs e)
+    {
+        _themesCts = new CancellationTokenSource();
+        BuildThemesButton.IsEnabled = false;
+        ThemesProgressBar.Visibility = Visibility.Visible;
+        ThemesProgressText.Visibility = Visibility.Visible;
+        ThemesProgressBar.IsIndeterminate = true;
+        ThemesProgressText.Text = "Loading embeddings…";
+
+        var progress = new Progress<ClusteringProgress>(p =>
+        {
+            ThemesProgressBar.IsIndeterminate = p.Total == 0;
+            if (p.Total > 0)
+            {
+                ThemesProgressBar.Maximum = p.Total;
+                ThemesProgressBar.Value = p.Current;
+            }
+            ThemesProgressText.Text = p.Total > 0
+                ? $"{p.Phase} ({p.Current}/{p.Total})"
+                : $"{p.Phase}";
+        });
+
+        try
+        {
+            await _clustering.RecomputeAsync(k: null, progress, _themesCts.Token);
+            ThemesProgressText.Text = "Themes built.";
+        }
+        catch (OperationCanceledException)
+        {
+            ThemesProgressText.Text = "Cancelled.";
+        }
+        catch (Exception ex)
+        {
+            ThemesProgressText.Text = $"Failed: {ex.Message}";
+        }
+        finally
+        {
+            _themesCts.Dispose();
+            _themesCts = null;
+            ThemesProgressBar.IsIndeterminate = false;
+            await RefreshThemesStatusAsync();
+        }
+    }
 
     private static string FormatBytes(long bytes)
     {

@@ -101,7 +101,11 @@ public sealed partial class ReaderPage : Page
         }
         else
         {
-            var saved = await _positionStore.GetAsync(path);
+            // Microsoft.Data.Sqlite's "async" methods run synchronously, so a
+            // direct await on the UI thread blocks it for the full busy_timeout
+            // window if the indexer currently holds the write lock. Hop to the
+            // thread pool.
+            var saved = await Task.Run(() => _positionStore.GetAsync(path));
             await ReaderControl.LoadBookAsync(
                 reader,
                 initialSpineIndex: saved?.SpineIndex ?? 0,
@@ -133,7 +137,10 @@ public sealed partial class ReaderPage : Page
             DateTimeOffset.UtcNow);
         try
         {
-            await _positionStore.SaveAsync(path, position);
+            // Microsoft.Data.Sqlite is synchronous-under-the-hood, so a save
+            // contending with the indexer's write lock would otherwise block
+            // the UI thread for up to 30 s (busy_timeout). Hop off the UI.
+            await Task.Run(() => _positionStore.SaveAsync(path, position));
         }
         catch (Exception ex)
         {

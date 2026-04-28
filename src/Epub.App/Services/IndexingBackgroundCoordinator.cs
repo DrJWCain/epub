@@ -103,7 +103,7 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
             {
                 if (await _store.IsBookIndexedAsync(path, ct).ConfigureAwait(false))
                 {
-                    if (_queue.Reader.Count == 0) Publish(null, null);
+                    Publish(null, null);
                     continue;
                 }
 
@@ -126,7 +126,13 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
                     $"[IndexingBackgroundCoordinator] book {Path.GetFileName(path)} failed: {ex.GetType().Name}: {ex.Message}");
             }
 
-            if (_queue.Reader.Count == 0) Publish(null, null);
+            // Always reset between books. If another book is queued, the next
+            // ReadAsync grabs it within microseconds and Publish for that book
+            // overwrites — the null flash is imperceptible. If the queue is
+            // empty, status correctly clears so the UI knows we're idle.
+            // (Don't read _queue.Reader.Count — it throws NotSupportedException
+            // on .NET 10's SingleReader unbounded channels.)
+            Publish(null, null);
         }
         Publish(null, null);
     }

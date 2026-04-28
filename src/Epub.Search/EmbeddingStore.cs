@@ -174,6 +174,160 @@ public sealed class EmbeddingStore : IEmbeddingStore
         return orderedIds.Select(id => byId[id]).ToList();
     }
 
+    public async Task EnumerateEmbeddingsAsync(
+        Func<long, ReadOnlyMemory<float>, CancellationToken, Task> onPair,
+        CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT chunk_id, vec FROM embeddings";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var chunkId = reader.GetInt64(0);
+            var blob = (byte[])reader["vec"];
+            await onPair(chunkId, BlobToFloats(blob), ct).ConfigureAwait(false);
+        }
+    }
+
+    public async Task RewriteClustersAsync(
+        IReadOnlyList<float[]> centroids,
+        IReadOnlyList<(long ChunkId, int ClusterIdx)> assignments,
+        CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        // Wipe in dependency order so the FK constraint is satisfied.
+        await using (var wipeAssignments = connection.CreateCommand())
+        {
+            wipeAssignments.Transaction = tx;
+            wipeAssignments.CommandText = "DELETE FROM chunk_clusters";
+            await wipeAssignments.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        await using (var wipeClusters = connection.CreateCommand())
+        {
+            wipeClusters.Transaction = tx;
+            wipeClusters.CommandText = "DELETE FROM clusters";
+            await wipeClusters.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        var nowEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var assignedClusterIds = new long[centroids.Count];
+
+        await using (var insertCluster = connection.CreateCommand())
+        {
+            insertCluster.Transaction = tx;
+            insertCluster.CommandText = """
+                INSERT INTO clusters(centroid, label, built_at)
+                VALUES($c, NULL, $at)
+                RETURNING id
+                """;
+            var cParam = insertCluster.Parameters.Add("$c", SqliteType.Blob);
+            insertCluster.Parameters.AddWithValue("$at", nowEpoch);
+            for (int i = 0; i < centroids.Count; i++)
+            {
+                cParam.Value = FloatsToBlob(centroids[i]);
+                assignedClusterIds[i] = Convert.ToInt64(await insertCluster.ExecuteScalarAsync(ct).ConfigureAwait(false));
+            }
+        }
+
+        await using (var insertAssign = connection.CreateCommand())
+        {
+            insertAssign.Transaction = tx;
+            insertAssign.CommandText = "INSERT INTO chunk_clusters(chunk_id, cluster_id) VALUES($cid, $bid)";
+            var cidParam = insertAssign.Parameters.Add("$cid", SqliteType.Integer);
+            var bidParam = insertAssign.Parameters.Add("$bid", SqliteType.Integer);
+            foreach (var (chunkId, idx) in assignments)
+            {
+                cidParam.Value = chunkId;
+                bidParam.Value = assignedClusterIds[idx];
+                await insertAssign.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task EnumerateClusterChunkTextsAsync(
+        Func<long, string, CancellationToken, Task> onPair,
+        CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT cc.cluster_id, c.text
+            FROM chunk_clusters cc
+            JOIN chunks c ON c.id = cc.chunk_id
+            """;
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            await onPair(reader.GetInt64(0), reader.GetString(1), ct).ConfigureAwait(false);
+        }
+    }
+
+    public async Task UpdateClusterLabelsAsync(
+        IReadOnlyDictionary<long, string> labels,
+        CancellationToken ct = default)
+    {
+        if (labels.Count == 0) return;
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = (SqliteTransaction)await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        await using var cmd = connection.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "UPDATE clusters SET label = $l WHERE id = $id";
+        var lParam = cmd.Parameters.Add("$l", SqliteType.Text);
+        var idParam = cmd.Parameters.Add("$id", SqliteType.Integer);
+        foreach (var (id, label) in labels)
+        {
+            lParam.Value = label;
+            idParam.Value = id;
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<ClusterRow>> GetClustersAsync(CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        var rows = new List<ClusterRow>();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT c.id, c.label, c.built_at, COUNT(cc.chunk_id) AS n
+            FROM clusters c
+            LEFT JOIN chunk_clusters cc ON cc.cluster_id = c.id
+            GROUP BY c.id, c.label, c.built_at
+            ORDER BY n DESC, c.id
+            """;
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            rows.Add(new ClusterRow(
+                Id: reader.GetInt64(0),
+                Label: reader.IsDBNull(1) ? null : reader.GetString(1),
+                ChunkCount: reader.GetInt32(3),
+                BuiltAt: DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2))));
+        }
+        return rows;
+    }
+
+    private static float[] BlobToFloats(byte[] blob)
+    {
+        var result = new float[blob.Length / sizeof(float)];
+        MemoryMarshal.Cast<byte, float>(blob).CopyTo(result);
+        return result;
+    }
+
     public async Task<IndexMeta> GetMetaAsync(CancellationToken ct = default)
     {
         await EnsureSchemaAsync(ct).ConfigureAwait(false);
@@ -224,7 +378,12 @@ public sealed class EmbeddingStore : IEmbeddingStore
         {
             await connection.OpenAsync(ct).ConfigureAwait(false);
             await using var pragma = connection.CreateCommand();
-            pragma.CommandText = "PRAGMA foreign_keys = ON";
+            // FK = enforce ON DELETE CASCADE on chunks → embeddings.
+            // busy_timeout = block (rather than fail with SQLITE_BUSY) for up to
+            // 30 s when another connection holds the write lock — happens during
+            // a per-book index transaction colliding with PositionStore writes
+            // from page turns.
+            pragma.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 30000";
             await pragma.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             return connection;
         }
@@ -282,6 +441,20 @@ public sealed class EmbeddingStore : IEmbeddingStore
                         key   TEXT PRIMARY KEY,
                         value TEXT NOT NULL
                     );
+
+                    CREATE TABLE IF NOT EXISTS clusters (
+                        id        INTEGER PRIMARY KEY,
+                        centroid  BLOB NOT NULL,
+                        label     TEXT,
+                        built_at  INTEGER NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS chunk_clusters (
+                        chunk_id   INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+                        cluster_id INTEGER NOT NULL REFERENCES clusters(id) ON DELETE CASCADE
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_chunk_clusters_cluster ON chunk_clusters(cluster_id);
                     """;
                 await ddl.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }

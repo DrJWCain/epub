@@ -26,7 +26,46 @@ public interface IEmbeddingStore
         ReadOnlyMemory<float> queryEmbedding, int k, CancellationToken ct = default);
 
     Task<IndexMeta> GetMetaAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Streams every (chunk_id, embedding) pair into a callback. Lets the
+    /// clustering pass walk the corpus without materialising 250k × 384-dim
+    /// floats into RAM all at once.
+    /// </summary>
+    Task EnumerateEmbeddingsAsync(
+        Func<long, ReadOnlyMemory<float>, CancellationToken, Task> onPair,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically replaces all clusters and chunk-cluster assignments with the
+    /// supplied set. Both tables are wiped before the new rows are written.
+    /// </summary>
+    Task RewriteClustersAsync(
+        IReadOnlyList<float[]> centroids,
+        IReadOnlyList<(long ChunkId, int ClusterIdx)> assignments,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ClusterRow>> GetClustersAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Streams every (cluster_id, chunk_text) pair so the labeler can walk the
+    /// post-clustering corpus without materialising it.
+    /// </summary>
+    Task EnumerateClusterChunkTextsAsync(
+        Func<long, string, CancellationToken, Task> onPair,
+        CancellationToken ct = default);
+
+    /// <summary>Batch-update cluster labels in a single transaction.</summary>
+    Task UpdateClusterLabelsAsync(
+        IReadOnlyDictionary<long, string> labels,
+        CancellationToken ct = default);
 }
+
+public sealed record ClusterRow(
+    long Id,
+    string? Label,
+    int ChunkCount,
+    DateTimeOffset BuiltAt);
 
 public interface IIndexSession : IAsyncDisposable
 {

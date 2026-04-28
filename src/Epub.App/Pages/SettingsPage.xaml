@@ -100,6 +100,55 @@
                     </StackPanel>
                 </Border>
             </StackPanel>
+
+            <StackPanel Spacing="8">
+                <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Themes" />
+                <TextBlock
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    Text="Group passages into themes so you can browse your library by topic. Builds on the semantic index above; re-run after adding a big batch of new books." />
+
+                <Border
+                    Padding="12"
+                    Background="{ThemeResource SystemControlBackgroundChromeMediumLowBrush}"
+                    BorderBrush="{ThemeResource SystemControlBackgroundBaseLowBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                    <StackPanel Spacing="12">
+                        <TextBlock
+                            x:Name="ThemesStatusText"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            TextWrapping="WrapWholeWords"
+                            Text="Status not loaded yet…" />
+                        <TextBlock
+                            x:Name="ThemesSampleText"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextWrapping="WrapWholeWords"
+                            Visibility="Collapsed" />
+                        <ProgressBar
+                            x:Name="ThemesProgressBar"
+                            Minimum="0"
+                            Maximum="1"
+                            Visibility="Collapsed" />
+                        <TextBlock
+                            x:Name="ThemesProgressText"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            TextWrapping="WrapWholeWords"
+                            Visibility="Collapsed" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Button
+                                x:Name="BuildThemesButton"
+                                Grid.Column="1"
+                                Click="BuildThemes_Click"
+                                Content="Build themes" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
         </StackPanel>
     </ScrollViewer>
 </Page>
