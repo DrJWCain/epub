@@ -21,7 +21,18 @@ public sealed class EmbeddingStore : IEmbeddingStore
     public async Task<IIndexSession> BeginIndexAsync(string bookPath, CancellationToken ct = default)
     {
         await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        // No DB work yet — just hand back a buffered session. Append calls
+        // accumulate in RAM; Complete does the whole upsert+wipe+insert
+        // dance in one short transaction. Keeps the SQLite write lock held
+        // only briefly rather than for the full embedding run.
+        return new IndexSession(this, bookPath);
+    }
 
+    private async Task PersistBookAsync(
+        string bookPath,
+        IReadOnlyList<BufferedChunk> chunks,
+        CancellationToken ct)
+    {
         long size = 0, mtime = 0;
         if (File.Exists(bookPath))
         {
@@ -30,47 +41,101 @@ public sealed class EmbeddingStore : IEmbeddingStore
             mtime = ((DateTimeOffset)fi.LastWriteTimeUtc).ToUnixTimeSeconds();
         }
 
-        var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        try
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var tx = (SqliteTransaction)
+            await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        long bookId;
+        await using (var upsert = connection.CreateCommand())
         {
-            long bookId;
-            await using (var upsert = connection.CreateCommand())
-            {
-                upsert.CommandText = """
-                    INSERT INTO books_indexed(book_path, file_size, file_mtime, completed_at)
-                    VALUES($path, $size, $mtime, NULL)
-                    ON CONFLICT(book_path) DO UPDATE SET
-                        file_size = excluded.file_size,
-                        file_mtime = excluded.file_mtime,
-                        completed_at = NULL
-                    RETURNING book_id
-                    """;
-                upsert.Parameters.AddWithValue("$path", bookPath);
-                upsert.Parameters.AddWithValue("$size", size);
-                upsert.Parameters.AddWithValue("$mtime", mtime);
-                bookId = Convert.ToInt64(await upsert.ExecuteScalarAsync(ct).ConfigureAwait(false));
-            }
-
-            // Wipe any prior partial chunks for this book before re-indexing
-            // (CASCADE on the FK takes care of embeddings rows).
-            await using (var wipe = connection.CreateCommand())
-            {
-                wipe.CommandText = "DELETE FROM chunks WHERE book_id = $bid";
-                wipe.Parameters.AddWithValue("$bid", bookId);
-                await wipe.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            var transaction = (SqliteTransaction)
-                await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-
-            return new IndexSession(bookId, connection, transaction);
+            upsert.Transaction = tx;
+            upsert.CommandText = """
+                INSERT INTO books_indexed(book_path, file_size, file_mtime, completed_at)
+                VALUES($path, $size, $mtime, NULL)
+                ON CONFLICT(book_path) DO UPDATE SET
+                    file_size = excluded.file_size,
+                    file_mtime = excluded.file_mtime,
+                    completed_at = NULL
+                RETURNING book_id
+                """;
+            upsert.Parameters.AddWithValue("$path", bookPath);
+            upsert.Parameters.AddWithValue("$size", size);
+            upsert.Parameters.AddWithValue("$mtime", mtime);
+            bookId = Convert.ToInt64(await upsert.ExecuteScalarAsync(ct).ConfigureAwait(false));
         }
-        catch
+
+        // Wipe any prior chunks for this book — covers re-index of either
+        // a previously-completed run or a half-finished prior attempt.
+        // CASCADE on the FK takes care of embeddings rows.
+        await using (var wipe = connection.CreateCommand())
         {
-            await connection.DisposeAsync().ConfigureAwait(false);
-            throw;
+            wipe.Transaction = tx;
+            wipe.CommandText = "DELETE FROM chunks WHERE book_id = $bid";
+            wipe.Parameters.AddWithValue("$bid", bookId);
+            await wipe.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
+
+        var addedAtMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        await using (var insertChunk = connection.CreateCommand())
+        await using (var insertEmb = connection.CreateCommand())
+        {
+            insertChunk.Transaction = tx;
+            insertChunk.CommandText = """
+                INSERT INTO chunks(book_id, spine_idx, char_offset, char_length, text, added_at)
+                VALUES($bid, $sp, $co, $cl, $tx, $at)
+                RETURNING id
+                """;
+            var bidP = insertChunk.Parameters.Add("$bid", SqliteType.Integer);
+            var spP = insertChunk.Parameters.Add("$sp", SqliteType.Integer);
+            var coP = insertChunk.Parameters.Add("$co", SqliteType.Integer);
+            var clP = insertChunk.Parameters.Add("$cl", SqliteType.Integer);
+            var txP = insertChunk.Parameters.Add("$tx", SqliteType.Text);
+            var atP = insertChunk.Parameters.Add("$at", SqliteType.Integer);
+
+            insertEmb.Transaction = tx;
+            insertEmb.CommandText = "INSERT INTO embeddings(chunk_id, vec) VALUES($cid, $v)";
+            var cidP = insertEmb.Parameters.Add("$cid", SqliteType.Integer);
+            var vP = insertEmb.Parameters.Add("$v", SqliteType.Blob);
+
+            bidP.Value = bookId;
+            atP.Value = addedAtMs;
+            foreach (var c in chunks)
+            {
+                ct.ThrowIfCancellationRequested();
+                spP.Value = c.SpineIdx;
+                coP.Value = c.CharOffset;
+                clP.Value = c.CharLength;
+                txP.Value = c.Text;
+                var chunkId = Convert.ToInt64(
+                    await insertChunk.ExecuteScalarAsync(ct).ConfigureAwait(false));
+                cidP.Value = chunkId;
+                vP.Value = FloatsToBlob(c.Embedding);
+                await insertEmb.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
+        }
+
+        var nowEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        await using (var stamp = connection.CreateCommand())
+        {
+            stamp.Transaction = tx;
+            stamp.CommandText = "UPDATE books_indexed SET completed_at = $at WHERE book_id = $bid";
+            stamp.Parameters.AddWithValue("$at", nowEpoch);
+            stamp.Parameters.AddWithValue("$bid", bookId);
+            await stamp.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        await using (var meta = connection.CreateCommand())
+        {
+            meta.Transaction = tx;
+            meta.CommandText = "INSERT OR REPLACE INTO index_meta(key, value) VALUES('last_build_at', $v)";
+            meta.Parameters.AddWithValue("$v", nowEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            await meta.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
     }
+
+    private sealed record BufferedChunk(
+        int SpineIdx, int CharOffset, int CharLength, string Text, float[] Embedding);
 
     public async Task<bool> IsBookIndexedAsync(string bookPath, CancellationToken ct = default)
     {
@@ -519,97 +584,44 @@ public sealed class EmbeddingStore : IEmbeddingStore
 
     private sealed class IndexSession : IIndexSession
     {
-        private readonly SqliteConnection _connection;
-        private SqliteTransaction? _transaction;
+        private readonly EmbeddingStore _store;
+        private readonly string _bookPath;
+        private readonly List<BufferedChunk> _buffer = new();
         private bool _completed;
         private bool _disposed;
 
-        public long BookId { get; }
-
-        public IndexSession(long bookId, SqliteConnection connection, SqliteTransaction transaction)
+        public IndexSession(EmbeddingStore store, string bookPath)
         {
-            BookId = bookId;
-            _connection = connection;
-            _transaction = transaction;
+            _store = store;
+            _bookPath = bookPath;
         }
 
-        public async Task AppendChunkAsync(int spineIdx, int charOffset, int charLength, string text,
+        public Task AppendChunkAsync(int spineIdx, int charOffset, int charLength, string text,
             ReadOnlyMemory<float> embedding, CancellationToken ct = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_transaction is null)
-                throw new InvalidOperationException("Session has been completed or rolled back.");
-
-            long chunkId;
-            await using (var ic = _connection.CreateCommand())
-            {
-                ic.Transaction = _transaction;
-                ic.CommandText = """
-                    INSERT INTO chunks(book_id, spine_idx, char_offset, char_length, text, added_at)
-                    VALUES($bid, $sp, $co, $cl, $tx, $at)
-                    RETURNING id
-                    """;
-                ic.Parameters.AddWithValue("$bid", BookId);
-                ic.Parameters.AddWithValue("$sp", spineIdx);
-                ic.Parameters.AddWithValue("$co", charOffset);
-                ic.Parameters.AddWithValue("$cl", charLength);
-                ic.Parameters.AddWithValue("$tx", text);
-                ic.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                chunkId = Convert.ToInt64(await ic.ExecuteScalarAsync(ct).ConfigureAwait(false));
-            }
-
-            await using var ie = _connection.CreateCommand();
-            ie.Transaction = _transaction;
-            ie.CommandText = "INSERT INTO embeddings(chunk_id, vec) VALUES($cid, $v)";
-            ie.Parameters.AddWithValue("$cid", chunkId);
-            ie.Parameters.AddWithValue("$v", FloatsToBlob(embedding.Span));
-            await ie.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            if (_completed)
+                throw new InvalidOperationException("Session has already been completed.");
+            _buffer.Add(new BufferedChunk(
+                spineIdx, charOffset, charLength, text, embedding.ToArray()));
+            return Task.CompletedTask;
         }
 
         public async Task CompleteAsync(CancellationToken ct = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_transaction is null)
+            if (_completed)
                 throw new InvalidOperationException("Session has already been completed.");
-
-            var nowEpoch = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            await using (var stamp = _connection.CreateCommand())
-            {
-                stamp.Transaction = _transaction;
-                stamp.CommandText = "UPDATE books_indexed SET completed_at = $at WHERE book_id = $bid";
-                stamp.Parameters.AddWithValue("$at", nowEpoch);
-                stamp.Parameters.AddWithValue("$bid", BookId);
-                await stamp.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-            await using (var meta = _connection.CreateCommand())
-            {
-                meta.Transaction = _transaction;
-                meta.CommandText = "INSERT OR REPLACE INTO index_meta(key, value) VALUES('last_build_at', $v)";
-                meta.Parameters.AddWithValue("$v", nowEpoch.ToString(System.Globalization.CultureInfo.InvariantCulture));
-                await meta.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
-            await _transaction.CommitAsync(ct).ConfigureAwait(false);
-            await _transaction.DisposeAsync().ConfigureAwait(false);
-            _transaction = null;
+            await _store.PersistBookAsync(_bookPath, _buffer, ct).ConfigureAwait(false);
             _completed = true;
         }
 
-        public async ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
-            if (_disposed) return;
+            // Buffered data is dropped if not Completed — equivalent to rollback,
+            // and free since nothing was ever written.
             _disposed = true;
-
-            if (_transaction is not null)
-            {
-                if (!_completed)
-                {
-                    try { await _transaction.RollbackAsync().ConfigureAwait(false); }
-                    catch { /* ignore: rollback on a closed connection or after error */ }
-                }
-                await _transaction.DisposeAsync().ConfigureAwait(false);
-            }
-            await _connection.DisposeAsync().ConfigureAwait(false);
+            return ValueTask.CompletedTask;
         }
     }
 }

@@ -69,12 +69,17 @@ public sealed record ClusterRow(
 
 public interface IIndexSession : IAsyncDisposable
 {
-    long BookId { get; }
-
+    /// <summary>Buffer a chunk + its embedding in RAM. No DB I/O happens until
+    /// <see cref="CompleteAsync"/>. Sessions that get disposed without completing
+    /// drop their buffer and write nothing — equivalent to a rollback.</summary>
     Task AppendChunkAsync(int spineIdx, int charOffset, int charLength, string text,
         ReadOnlyMemory<float> embedding, CancellationToken ct = default);
 
-    /// <summary>Commit the indexing transaction and mark the book as fully indexed.</summary>
+    /// <summary>Flush every buffered chunk to SQLite in a single short transaction:
+    /// upsert books_indexed, wipe any prior chunks for this book, bulk-insert the
+    /// new chunks + embeddings, and stamp completed_at. The DB write lock is held
+    /// for the duration of this call only — typically 1–2 s for 1500 chunks —
+    /// rather than the full embedding run.</summary>
     Task CompleteAsync(CancellationToken ct = default);
 }
 
