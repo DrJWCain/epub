@@ -31,7 +31,12 @@
     var PROSE_BLOCK_TAGS = {
         'p': 1, 'blockquote': 1, 'li': 1, 'pre': 1,
         'h1': 1, 'h2': 1, 'h3': 1, 'h4': 1, 'h5': 1, 'h6': 1,
-        'td': 1, 'th': 1, 'figcaption': 1
+        'td': 1, 'th': 1, 'figcaption': 1,
+        // Some publisher templates (Engineering a Compiler etc.) wrap each
+        // paragraph in a <div> rather than a <p>. Include div as a fallback
+        // so right-click finds something instead of falling through to
+        // Chromium's default selection-context menu.
+        'div': 1
     };
 
     function findEnclosingProseBlock(start) {
@@ -116,7 +121,11 @@
             // to show neighbors. Walk up to a paragraph-like block element
             // and use its text as the embedding probe. Skip images / tiny
             // snippets so page numbers and single-word labels don't trigger.
+            // If the user has selected text first, let the default menu
+            // through so Copy still works.
             document.addEventListener('contextmenu', function (e) {
+                var sel = window.getSelection && window.getSelection();
+                if (sel && sel.toString().length > 0) return;
                 var target = findEnclosingProseBlock(e.target);
                 if (!target) return;
                 var text = (target.textContent || '').trim();
