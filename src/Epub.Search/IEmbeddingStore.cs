@@ -48,6 +48,13 @@ public interface IEmbeddingStore
     Task<IReadOnlyList<ClusterRow>> GetClustersAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Returns every passage assigned to the given cluster, ordered by book and
+    /// then by position within the book — so a UI can group them by source.
+    /// </summary>
+    Task<IReadOnlyList<ClusterPassage>> GetClusterPassagesAsync(
+        long clusterId, CancellationToken ct = default);
+
+    /// <summary>
     /// Streams every (cluster_id, chunk_text) pair so the labeler can walk the
     /// post-clustering corpus without materialising it.
     /// </summary>
@@ -67,6 +74,15 @@ public sealed record ClusterRow(
     int ChunkCount,
     int BookCount,
     DateTimeOffset BuiltAt);
+
+public sealed record ClusterPassage(
+    long ChunkId,
+    long BookId,
+    string BookPath,
+    int SpineIdx,
+    int CharOffset,
+    int CharLength,
+    string Snippet);
 
 public interface IIndexSession : IAsyncDisposable
 {

@@ -63,9 +63,10 @@ public sealed partial class DiscoverPage : Page
 
     private void Cluster_Click(object sender, ItemClickEventArgs e)
     {
-        // S3.3 wires the detail view. For now, no-op — visible indication is
-        // just the card's hover state.
-        _ = e;
+        if (e.ClickedItem is ClusterCard card)
+        {
+            Frame.Navigate(typeof(ClusterDetailPage), card.Row);
+        }
     }
 }
 

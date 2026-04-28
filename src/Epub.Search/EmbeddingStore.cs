@@ -317,6 +317,40 @@ public sealed class EmbeddingStore : IEmbeddingStore
         await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<ClusterPassage>> GetClusterPassagesAsync(
+        long clusterId, CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        var passages = new List<ClusterPassage>();
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = """
+            SELECT ch.id, ch.book_id, b.book_path, ch.spine_idx,
+                   ch.char_offset, ch.char_length, ch.text
+            FROM chunk_clusters cc
+            JOIN chunks ch ON ch.id = cc.chunk_id
+            JOIN books_indexed b ON b.book_id = ch.book_id
+            WHERE cc.cluster_id = $cid
+            ORDER BY ch.book_id, ch.spine_idx, ch.char_offset
+            """;
+        cmd.Parameters.AddWithValue("$cid", clusterId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var text = reader.GetString(6);
+            passages.Add(new ClusterPassage(
+                ChunkId: reader.GetInt64(0),
+                BookId: reader.GetInt64(1),
+                BookPath: reader.GetString(2),
+                SpineIdx: reader.GetInt32(3),
+                CharOffset: reader.GetInt32(4),
+                CharLength: reader.GetInt32(5),
+                Snippet: Snippet(text)));
+        }
+        return passages;
+    }
+
     public async Task EnumerateClusterChunkTextsAsync(
         Func<long, string, CancellationToken, Task> onPair,
         CancellationToken ct = default)
