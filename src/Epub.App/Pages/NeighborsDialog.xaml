@@ -11,7 +11,14 @@
     DefaultButton="Close"
     mc:Ignorable="d">
 
-    <Grid Width="640" Height="520">
+    <ContentDialog.Resources>
+        <!-- Default ContentDialogContentMaxWidth is ~548; bump it so wrapped
+             snippets have room to breathe rather than being squeezed. -->
+        <x:Double x:Key="ContentDialogContentMaxWidth">760</x:Double>
+        <x:Double x:Key="ContentDialogMaxWidth">800</x:Double>
+    </ContentDialog.Resources>
+
+    <Grid MinWidth="520" Width="720" Height="520">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -42,6 +49,8 @@
             Grid.Row="1"
             IsItemClickEnabled="True"
             ItemClick="Result_Click"
+            ScrollViewer.HorizontalScrollMode="Disabled"
+            ScrollViewer.HorizontalScrollBarVisibility="Disabled"
             SelectionMode="None">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">

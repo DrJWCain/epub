@@ -23,7 +23,7 @@ public sealed partial class LibraryPage : Page
         _session = App.Current.Services.GetRequiredService<IBookSession>();
         _indexingCoordinator = App.Current.Services.GetRequiredService<IndexingBackgroundCoordinator>();
         _indexingCoordinator.StatusChanged += OnIndexingStatusChanged;
-        UpdateIndexingStatus(_indexingCoordinator.CurrentStatus);
+        UpdateIndexingStatus(_indexingCoordinator.Current);
     }
 
     protected override async void OnNavigatedTo(NavigationEventArgs e)
@@ -38,20 +38,19 @@ public sealed partial class LibraryPage : Page
         _indexingCoordinator.StatusChanged -= OnIndexingStatusChanged;
     }
 
-    private void OnIndexingStatusChanged(object? sender, string? status)
+    private void OnIndexingStatusChanged(object? sender, IndexingBackgroundCoordinator.CoordinatorStatus snapshot)
     {
-        DispatcherQueue.TryEnqueue(() => UpdateIndexingStatus(status));
+        DispatcherQueue.TryEnqueue(() => UpdateIndexingStatus(snapshot));
     }
 
-    private void UpdateIndexingStatus(string? status)
+    private void UpdateIndexingStatus(IndexingBackgroundCoordinator.CoordinatorStatus snapshot)
     {
-        IndexingStatusLabel.Text = status ?? "";
-        IndexingStatusContainer.Visibility = string.IsNullOrEmpty(status)
+        IndexingStatusLabel.Text = snapshot.Text ?? "";
+        IndexingStatusContainer.Visibility = string.IsNullOrEmpty(snapshot.Text)
             ? Visibility.Collapsed
             : Visibility.Visible;
 
-        var progress = _indexingCoordinator.CurrentProgress;
-        if (progress is { ChunksTotal: > 0 } p)
+        if (snapshot.Progress is { ChunksTotal: > 0 } p)
         {
             IndexingProgressBar.IsIndeterminate = false;
             IndexingProgressBar.Maximum = p.ChunksTotal;

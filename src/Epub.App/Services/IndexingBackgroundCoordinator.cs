@@ -24,12 +24,15 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
     private readonly CancellationTokenSource _workerCts;
     private readonly Task _workerTask;
 
-    public event EventHandler<string?>? StatusChanged;
-    public string? CurrentStatus { get; private set; }
+    public event EventHandler<CoordinatorStatus>? StatusChanged;
 
-    /// <summary>Per-chunk progress for the book currently being indexed, or null
-    /// when idle. Updated alongside <see cref="CurrentStatus"/>.</summary>
-    public IndexProgress? CurrentProgress { get; private set; }
+    /// <summary>Atomic snapshot of the coordinator's current status. Subscribers
+    /// receive an immutable record per event so UI handlers can't observe a
+    /// torn (string, progress) pair when one book ends and the next begins.</summary>
+    public CoordinatorStatus Current { get; private set; } = new(null, null);
+
+    public string? CurrentStatus => Current.Text;
+    public IndexProgress? CurrentProgress => Current.Progress;
 
     public IndexingBackgroundCoordinator(
         ILibraryService library,
@@ -97,22 +100,21 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
             {
                 if (await _store.IsBookIndexedAsync(path, ct).ConfigureAwait(false))
                 {
-                    if (_queue.Reader.Count == 0) SetStatus(null);
+                    if (_queue.Reader.Count == 0) Publish(null, null);
                     continue;
                 }
 
                 var title = Path.GetFileNameWithoutExtension(path);
-                CurrentProgress = null;
-                SetStatus($"Indexing '{title}'…");
+                Publish($"Indexing '{title}'…", null);
                 var progress = new Progress<IndexProgress>(p =>
                 {
-                    CurrentProgress = p;
-                    SetStatus(p.ChunksTotal > 0
-                        ? $"Indexing '{title}' — chunk {p.ChunksDone}/{p.ChunksTotal}"
-                        : $"Indexing '{title}'…");
+                    Publish(
+                        p.ChunksTotal > 0
+                            ? $"Indexing '{title}' — chunk {p.ChunksDone}/{p.ChunksTotal}"
+                            : $"Indexing '{title}'…",
+                        p);
                 });
                 await _indexing.IndexBookAsync(path, progress, ct).ConfigureAwait(false);
-                CurrentProgress = null;
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
@@ -121,23 +123,19 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
                     $"[IndexingBackgroundCoordinator] book {Path.GetFileName(path)} failed: {ex.GetType().Name}: {ex.Message}");
             }
 
-            if (_queue.Reader.Count == 0)
-            {
-                CurrentProgress = null;
-                SetStatus(null);
-            }
+            if (_queue.Reader.Count == 0) Publish(null, null);
         }
-        CurrentProgress = null;
-        SetStatus(null);
+        Publish(null, null);
     }
 
-    private void SetStatus(string? status)
+    private void Publish(string? text, IndexProgress? progress)
     {
-        // Don't short-circuit on equal strings — chunk-progress callers want the
-        // event to fire so the UI can read CurrentProgress for the bar.
-        CurrentStatus = status;
-        StatusChanged?.Invoke(this, status);
+        var snapshot = new CoordinatorStatus(text, progress);
+        Current = snapshot;
+        StatusChanged?.Invoke(this, snapshot);
     }
+
+    public sealed record CoordinatorStatus(string? Text, IndexProgress? Progress);
 
     public void Dispose()
     {

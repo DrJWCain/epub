@@ -45,7 +45,7 @@ public sealed partial class SettingsPage : Page
         _coordinator.StatusChanged -= OnCoordinatorStatusChanged;
     }
 
-    private void OnCoordinatorStatusChanged(object? sender, string? status)
+    private void OnCoordinatorStatusChanged(object? sender, IndexingBackgroundCoordinator.CoordinatorStatus snapshot)
     {
         DispatcherQueue.TryEnqueue(async () => await RefreshIndexStatusAsync());
     }
