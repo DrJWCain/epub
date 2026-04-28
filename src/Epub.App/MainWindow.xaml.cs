@@ -80,6 +80,9 @@ public sealed partial class MainWindow : Window
                 case "search":
                     NavFrame.Navigate(typeof(SearchPage));
                     break;
+                case "discover":
+                    NavFrame.Navigate(typeof(DiscoverPage));
+                    break;
                 default:
                     throw new InvalidOperationException($"Unknown navigation item tag: {item.Tag}");
             }

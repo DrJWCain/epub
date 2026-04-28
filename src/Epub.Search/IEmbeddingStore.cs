@@ -65,6 +65,7 @@ public sealed record ClusterRow(
     long Id,
     string? Label,
     int ChunkCount,
+    int BookCount,
     DateTimeOffset BuiltAt);
 
 public interface IIndexSession : IAsyncDisposable

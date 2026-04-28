@@ -368,11 +368,17 @@ public sealed class EmbeddingStore : IEmbeddingStore
         var rows = new List<ClusterRow>();
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
-            SELECT c.id, c.label, c.built_at, COUNT(cc.chunk_id) AS n
+            SELECT
+                c.id,
+                c.label,
+                c.built_at,
+                COUNT(cc.chunk_id) AS n_chunks,
+                COUNT(DISTINCT ch.book_id) AS n_books
             FROM clusters c
             LEFT JOIN chunk_clusters cc ON cc.cluster_id = c.id
+            LEFT JOIN chunks ch ON ch.id = cc.chunk_id
             GROUP BY c.id, c.label, c.built_at
-            ORDER BY n DESC, c.id
+            ORDER BY n_chunks DESC, c.id
             """;
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -381,6 +387,7 @@ public sealed class EmbeddingStore : IEmbeddingStore
                 Id: reader.GetInt64(0),
                 Label: reader.IsDBNull(1) ? null : reader.GetString(1),
                 ChunkCount: reader.GetInt32(3),
+                BookCount: reader.GetInt32(4),
                 BuiltAt: DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(2))));
         }
         return rows;

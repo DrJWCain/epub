@@ -59,6 +59,11 @@
                         <FontIcon Glyph="&#xE721;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Discover" Tag="discover">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE8A9;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <Frame x:Name="NavFrame" />
         </NavigationView>
