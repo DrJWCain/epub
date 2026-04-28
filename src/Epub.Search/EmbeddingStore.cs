@@ -83,6 +83,20 @@ public sealed class EmbeddingStore : IEmbeddingStore
         return result is not null && result is not DBNull;
     }
 
+    public async Task<IReadOnlySet<string>> GetIndexedBookPathsAsync(CancellationToken ct = default)
+    {
+        await EnsureSchemaAsync(ct).ConfigureAwait(false);
+        await using var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
+
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using var cmd = connection.CreateCommand();
+        cmd.CommandText = "SELECT book_path FROM books_indexed WHERE completed_at IS NOT NULL";
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            paths.Add(reader.GetString(0));
+        return paths;
+    }
+
     public async Task<IReadOnlyList<SearchHit>> SearchAsync(
         ReadOnlyMemory<float> queryEmbedding, int k, CancellationToken ct = default)
     {

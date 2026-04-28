@@ -12,6 +12,13 @@ public interface IEmbeddingStore
     Task<bool> IsBookIndexedAsync(string bookPath, CancellationToken ct = default);
 
     /// <summary>
+    /// Returns the absolute paths of every book whose indexing has completed.
+    /// One round-trip — preferred over N calls to <see cref="IsBookIndexedAsync"/>
+    /// when the caller wants to filter a list.
+    /// </summary>
+    Task<IReadOnlySet<string>> GetIndexedBookPathsAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Top-K nearest chunks by cosine similarity to <paramref name="queryEmbedding"/>.
     /// Results are ordered by descending similarity (most similar first).
     /// </summary>

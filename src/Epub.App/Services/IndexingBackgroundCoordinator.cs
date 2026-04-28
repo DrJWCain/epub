@@ -63,11 +63,14 @@ public sealed class IndexingBackgroundCoordinator : IDisposable
 
         try
         {
+            // One round-trip to fetch every completed book_path; in-memory
+            // filter the rest. Replaces N sequential IsBookIndexedAsync calls
+            // (one open-connection-per-call each) when the library is large.
+            var indexed = await _store.GetIndexedBookPathsAsync(_workerCts.Token).ConfigureAwait(false);
             foreach (var path in paths)
             {
                 if (_workerCts.IsCancellationRequested) return;
-                if (await _store.IsBookIndexedAsync(path, _workerCts.Token).ConfigureAwait(false))
-                    continue;
+                if (indexed.Contains(path)) continue;
                 await _queue.Writer.WriteAsync(path, _workerCts.Token).ConfigureAwait(false);
             }
         }

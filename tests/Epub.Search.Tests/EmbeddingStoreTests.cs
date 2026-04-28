@@ -148,6 +148,38 @@ public sealed class EmbeddingStoreTests
     }
 
     [Fact]
+    public async Task GetIndexedBookPaths_ReturnsOnlyCompletedBooks_CaseInsensitive()
+    {
+        using var temp = new TempDb();
+        var store = new EmbeddingStore(temp.Path);
+
+        // Two books complete, one abandoned mid-flight.
+        await using (var s = await store.BeginIndexAsync("c:/Books/Alpha.epub"))
+        {
+            await s.AppendChunkAsync(0, 0, 1, "a", UnitVector(0, 8));
+            await s.CompleteAsync();
+        }
+        await using (var s = await store.BeginIndexAsync("c:/Books/Beta.epub"))
+        {
+            await s.AppendChunkAsync(0, 0, 1, "b", UnitVector(1, 8));
+            await s.CompleteAsync();
+        }
+        await using (var _ = await store.BeginIndexAsync("c:/Books/Gamma.epub"))
+        {
+            // No CompleteAsync — falls out as rolled back / not indexed
+        }
+
+        var indexed = await store.GetIndexedBookPathsAsync();
+
+        indexed.Should().HaveCount(2);
+        indexed.Should().Contain("c:/Books/Alpha.epub");
+        indexed.Should().Contain("c:/Books/Beta.epub");
+        indexed.Should().NotContain("c:/Books/Gamma.epub");
+        indexed.Contains("C:/BOOKS/ALPHA.EPUB").Should().BeTrue(
+            "the set is OrdinalIgnoreCase to match the schema's COLLATE NOCASE");
+    }
+
+    [Fact]
     public async Task GetMeta_ReturnsCounts_AndLastBuildTimestamp()
     {
         using var temp = new TempDb();
