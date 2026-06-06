@@ -1,6 +1,6 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Epub.Search.Embedding;
 
 namespace Epub.Search.Llm;
@@ -130,54 +130,163 @@ public sealed class ConceptThreadService
     private static IReadOnlyList<ConceptThreadStep> ParseThreadJson(
         string llmOutput, IReadOnlyList<SearchHit> hits)
     {
-        // Phi-4 occasionally wraps JSON in markdown fences despite the
-        // instruction. Strip anything outside the first { ... } pair.
-        var braceStart = llmOutput.IndexOf('{');
-        var braceEnd = llmOutput.LastIndexOf('}');
-        if (braceStart < 0 || braceEnd <= braceStart)
-            return Array.Empty<ConceptThreadStep>();
+        // The model often emits valid JSON followed by trailing commentary
+        // (sometimes with embedded braces), or wraps the JSON in markdown
+        // fences, or — for off-template queries — drops the wrapping object
+        // and writes a bare array. Walk forward from the first opener,
+        // tracking depth, to extract the first balanced block; try {…} then
+        // [...]. Inside, accept several plausible root keys and id fields.
+        var objectJson = ExtractFirstBalanced(llmOutput, '{', '}');
+        if (objectJson is not null)
+        {
+            var steps = TryParseObject(objectJson, hits);
+            if (steps.Count > 0) return steps;
+        }
 
-        var json = llmOutput.Substring(braceStart, braceEnd - braceStart + 1);
-        ThreadJson? parsed;
+        var arrayJson = ExtractFirstBalanced(llmOutput, '[', ']');
+        if (arrayJson is not null)
+        {
+            var steps = TryParseArray(arrayJson, hits);
+            if (steps.Count > 0) return steps;
+        }
+
+        return Array.Empty<ConceptThreadStep>();
+    }
+
+    private static string? ExtractFirstBalanced(string text, char open, char close)
+    {
+        var start = text.IndexOf(open);
+        if (start < 0) return null;
+        var depth = 0;
+        var inString = false;
+        var escape = false;
+        for (var i = start; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (escape) { escape = false; continue; }
+            if (inString)
+            {
+                if (c == '\\') escape = true;
+                else if (c == '"') inString = false;
+                continue;
+            }
+            if (c == '"') { inString = true; continue; }
+            if (c == open) depth++;
+            else if (c == close)
+            {
+                depth--;
+                if (depth == 0) return text.Substring(start, i - start + 1);
+            }
+        }
+        return null;
+    }
+
+    private static IReadOnlyList<ConceptThreadStep> TryParseObject(
+        string json, IReadOnlyList<SearchHit> hits)
+    {
         try
         {
-            parsed = JsonSerializer.Deserialize<ThreadJson>(json, JsonOptions);
+            using var doc = JsonDocument.Parse(json, JsonReaderOptions);
+            var root = doc.RootElement;
+            if (root.ValueKind == JsonValueKind.Array) return ParseStepArray(root, hits);
+            if (root.ValueKind != JsonValueKind.Object) return Array.Empty<ConceptThreadStep>();
+            // First pass: known root keys.
+            foreach (var name in new[] { "thread", "passages", "steps", "sequence", "items" })
+            {
+                if (root.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.Array)
+                {
+                    var steps = ParseStepArray(prop, hits);
+                    if (steps.Count > 0) return steps;
+                }
+            }
+            // Second pass: any array value the model named differently.
+            foreach (var prop in root.EnumerateObject())
+            {
+                if (prop.Value.ValueKind != JsonValueKind.Array) continue;
+                var steps = ParseStepArray(prop.Value, hits);
+                if (steps.Count > 0) return steps;
+            }
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return Array.Empty<ConceptThreadStep>();
+            Debug.WriteLine($"[ConceptThreadService] JSON object parse failed: {ex.Message}");
         }
-        if (parsed?.Thread is null) return Array.Empty<ConceptThreadStep>();
+        return Array.Empty<ConceptThreadStep>();
+    }
 
-        var steps = new List<ConceptThreadStep>(parsed.Thread.Count);
-        foreach (var step in parsed.Thread)
+    private static IReadOnlyList<ConceptThreadStep> TryParseArray(
+        string json, IReadOnlyList<SearchHit> hits)
+    {
+        try
         {
-            if (step.Id < 1 || step.Id > hits.Count) continue;
-            var hit = hits[step.Id - 1];
-            steps.Add(new ConceptThreadStep(hit, step.Transition ?? string.Empty));
+            using var doc = JsonDocument.Parse(json, JsonReaderOptions);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+                return ParseStepArray(doc.RootElement, hits);
+        }
+        catch (JsonException ex)
+        {
+            Debug.WriteLine($"[ConceptThreadService] JSON array parse failed: {ex.Message}");
+        }
+        return Array.Empty<ConceptThreadStep>();
+    }
+
+    private static IReadOnlyList<ConceptThreadStep> ParseStepArray(
+        JsonElement array, IReadOnlyList<SearchHit> hits)
+    {
+        var steps = new List<ConceptThreadStep>();
+        foreach (var element in array.EnumerateArray())
+        {
+            int? id;
+            string? transition;
+            if (element.ValueKind == JsonValueKind.Number)
+            {
+                // Tolerate a bare-number array like [3, 17, 42] as a degenerate shape.
+                id = element.TryGetInt32(out var n) ? n : null;
+                transition = null;
+            }
+            else if (element.ValueKind == JsonValueKind.Object)
+            {
+                id = TryGetInt(element, "id")
+                    ?? TryGetInt(element, "passage_id")
+                    ?? TryGetInt(element, "passage")
+                    ?? TryGetInt(element, "number")
+                    ?? TryGetInt(element, "n");
+                transition = TryGetString(element, "transition")
+                    ?? TryGetString(element, "intro")
+                    ?? TryGetString(element, "bridge")
+                    ?? TryGetString(element, "comment");
+            }
+            else continue;
+
+            if (id is null || id < 1 || id > hits.Count) continue;
+            steps.Add(new ConceptThreadStep(hits[id.Value - 1], transition ?? string.Empty));
         }
         return steps;
     }
+
+    private static int? TryGetInt(JsonElement el, string name)
+    {
+        if (!el.TryGetProperty(name, out var prop)) return null;
+        if (prop.ValueKind == JsonValueKind.Number && prop.TryGetInt32(out var n)) return n;
+        if (prop.ValueKind == JsonValueKind.String && int.TryParse(prop.GetString(), out var ns)) return ns;
+        return null;
+    }
+
+    private static string? TryGetString(JsonElement el, string name)
+        => el.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
+            ? prop.GetString() : null;
+
+    private static readonly JsonDocumentOptions JsonReaderOptions = new()
+    {
+        AllowTrailingCommas = true,
+        CommentHandling = JsonCommentHandling.Skip,
+    };
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         AllowTrailingCommas = true,
     };
-
-    private sealed class ThreadJson
-    {
-        [JsonPropertyName("thread")]
-        public List<ThreadJsonStep>? Thread { get; set; }
-    }
-
-    private sealed class ThreadJsonStep
-    {
-        [JsonPropertyName("id")]
-        public int Id { get; set; }
-        [JsonPropertyName("transition")]
-        public string? Transition { get; set; }
-    }
 }
 
 public sealed record ConceptThread(

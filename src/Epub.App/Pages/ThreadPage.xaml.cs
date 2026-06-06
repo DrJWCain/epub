@@ -139,6 +139,11 @@ public sealed partial class ThreadPage : Page
 
             if (thread.Steps.Count == 0)
             {
+                System.Diagnostics.Debug.WriteLine(
+                    $"[ThreadPage] No usable thread for query \"{query}\" (length {length}, " +
+                    $"{tokenCount} tokens, raw output {thread.RawLlmOutput.Length} chars). Raw output follows:");
+                System.Diagnostics.Debug.WriteLine(thread.RawLlmOutput);
+                System.Diagnostics.Debug.WriteLine("[ThreadPage] -- end raw output --");
                 StatusLabel.Text =
                     $"The model returned no usable thread (output {tokenCount} tokens). Try a different query or rebuild the index.";
             }
