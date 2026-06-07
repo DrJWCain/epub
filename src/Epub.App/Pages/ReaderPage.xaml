@@ -7,6 +7,7 @@
     xmlns:local="using:Epub_App.Pages"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:reader="using:Epub_Renderer"
+    xmlns:webview2="using:Microsoft.UI.Xaml.Controls"
     mc:Ignorable="d">
 
     <Grid>
@@ -30,6 +31,10 @@
                 Click="OpenEpub_Click"
                 Icon="OpenFile"
                 Label="Open EPUB" />
+            <AppBarButton
+                Click="OpenPdf_Click"
+                Icon="OpenFile"
+                Label="Open PDF" />
             <AppBarSeparator />
             <AppBarButton
                 x:Name="PrevButton"
@@ -93,12 +98,13 @@
             <SplitView.Content>
                 <Grid>
                     <reader:ReaderControl x:Name="ReaderControl" Visibility="Collapsed" />
+                    <webview2:WebView2 x:Name="PdfView" Visibility="Collapsed" />
                     <TextBlock
                         x:Name="EmptyState"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Style="{StaticResource SubtitleTextBlockStyle}"
-                        Text="No book open. Click Open EPUB to load one." />
+                        Text="No book open. Click Open EPUB or Open PDF to load one." />
                 </Grid>
             </SplitView.Content>
         </SplitView>

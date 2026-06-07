@@ -7,6 +7,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.Web.WebView2.Core;
 using Windows.Storage.Pickers;
 
 namespace Epub_App.Pages;
@@ -79,6 +80,12 @@ public sealed partial class ReaderPage : Page
 
     private async Task OpenAsync(string path, int? pendingSpineIndex = null, string? pendingProbeText = null)
     {
+        if (string.Equals(Path.GetExtension(path), ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            await OpenPdfAsync(path);
+            return;
+        }
+
         var reader = await EpubReader.OpenAsync(path);
 
         // Once the parser accepts the file, claim it so any incoming page-change
@@ -87,6 +94,7 @@ public sealed partial class ReaderPage : Page
         _currentBookPath = path;
 
         EmptyState.Visibility = Visibility.Collapsed;
+        PdfView.Visibility = Visibility.Collapsed;
         ReaderControl.Visibility = Visibility.Visible;
 
         if (!string.IsNullOrWhiteSpace(pendingProbeText))
@@ -189,6 +197,64 @@ public sealed partial class ReaderPage : Page
         if (file is null) return;
 
         await OpenAsync(file.Path);
+    }
+
+    private async void OpenPdf_Click(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker();
+        picker.FileTypeFilter.Add(".pdf");
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(App.Current.MainWindow);
+        WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+        var file = await picker.PickSingleFileAsync();
+        if (file is null) return;
+
+        await OpenAsync(file.Path);
+    }
+
+    private async Task OpenPdfAsync(string path)
+    {
+        // PDFs go through WebView2's built-in viewer. They don't participate in
+        // the EPUB position store / search index / TOC, so clear EPUB chrome
+        // and unclaim _currentBookPath so any straggler PageChanged from a
+        // previously-open EPUB doesn't write against this path.
+        _currentBookPath = null;
+        _currentBookTitle = Path.GetFileNameWithoutExtension(path);
+
+        EmptyState.Visibility = Visibility.Collapsed;
+        ReaderControl.Visibility = Visibility.Collapsed;
+        PdfView.Visibility = Visibility.Visible;
+
+        TocList.ItemsSource = null;
+        TocToggle.IsEnabled = false;
+        TocToggle.IsChecked = false;
+        TocSplitView.IsPaneOpen = false;
+        PrevButton.IsEnabled = false;
+        NextButton.IsEnabled = false;
+        ProgressLabel.Text = "—";
+
+        if (PdfView.CoreWebView2 is null)
+        {
+            // PdfView must NOT share a user-data folder with ReaderControl's
+            // WebView2: ReaderControl initialises its environment with a custom
+            // URL-scheme registration, and WebView2 forbids two environments
+            // with differing options on the same folder — the second to start
+            // gets a null CoreWebView2 (NRE). Opening a PDF and then an EPUB
+            // (or vice-versa) hit exactly that. A dedicated folder for the PDF
+            // viewer makes open-order irrelevant.
+            var pdfUserData = Path.Combine(
+                Windows.Storage.ApplicationData.Current.LocalFolder.Path, "PdfViewData");
+            var env = await CoreWebView2Environment.CreateWithOptionsAsync(
+                browserExecutableFolder: null,
+                userDataFolder: pdfUserData,
+                options: new CoreWebView2EnvironmentOptions());
+            await PdfView.EnsureCoreWebView2Async(env);
+        }
+        PdfView.Source = new Uri(path);
+
+        (App.Current.MainWindow as MainWindow)?.SetTitleBarTitle(_currentBookTitle);
     }
 
     private void TocToggle_Click(object sender, RoutedEventArgs e)

@@ -17,6 +17,14 @@ public sealed partial class ReaderControl : UserControl
     private EpubReader? _epubReader;
     private bool _webViewReady;
 
+    // Bumped on every new book load and woven into the URL authority. Without it,
+    // two books whose landing chapter resolves to the same internal path produce
+    // an identical epub:// URL, and WebView2 skips the navigation as a no-op — so
+    // the reader keeps showing the previous book. A per-load authority guarantees
+    // a distinct URL and a real reload. Stays constant for within-book navigation
+    // (chapter spill, TOC, anchors) so those keep working as before.
+    private int _bookEpoch;
+
     public event EventHandler? SpineChanged;
     public event EventHandler? PageChanged;
 
@@ -42,6 +50,7 @@ public sealed partial class ReaderControl : UserControl
     public async Task LoadBookAsync(EpubReader reader, int initialSpineIndex = 0, int initialPageInChapter = 0)
     {
         _epubReader = reader;
+        _bookEpoch++;
         CurrentSpineIndex = -1;
         CurrentPageInChapter = 0;
         ChapterPageCount = 1;
@@ -62,6 +71,7 @@ public sealed partial class ReaderControl : UserControl
     public async Task LoadBookAtTextAsync(EpubReader reader, int initialSpineIndex, string probeText)
     {
         _epubReader = reader;
+        _bookEpoch++;
         CurrentSpineIndex = -1;
         CurrentPageInChapter = 0;
         ChapterPageCount = 1;
@@ -106,7 +116,7 @@ public sealed partial class ReaderControl : UserControl
 
         var item = _epubReader.Book.Spine[index];
         var zipPath = _epubReader.ResolveHref(item.ManifestItem.Href);
-        var url = $"{SchemeName}://{Authority}/{zipPath}";
+        var url = $"{SchemeName}://{Authority}-{_bookEpoch}/{zipPath}";
         if (!string.IsNullOrEmpty(hashFragment))
             url += hashFragment.StartsWith('#') ? hashFragment : "#" + hashFragment;
         Debug.WriteLine($"[ReaderControl] Navigating to: {url}");

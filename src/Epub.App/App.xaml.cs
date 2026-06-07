@@ -15,13 +15,42 @@ public partial class App : Application
 
     public Window? MainWindow { get; private set; }
 
+    // Diagnostic crash log. WinUI surfaces unhandled UI-thread exceptions as a
+    // "stowed exception" fail-fast (0xc000027b) that hides the real error from
+    // the event log. Capturing them here writes the actual exception to disk.
+    private static readonly string CrashLogPath =
+        Path.Combine(Path.GetTempPath(), "epub-crash.log");
+
     public App()
     {
         InitializeComponent();
 
+        UnhandledException += (s, e) =>
+            // Log the real exception (WinUI otherwise reports only an opaque
+            // 0xc000027b stowed-exception fail-fast), then let it crash normally —
+            // swallowing it would leave the app wedged in a half-broken state.
+            LogCrash($"Xaml.UnhandledException: {e.Message}", e.Exception);
+        AppDomain.CurrentDomain.UnhandledException += (s, e) =>
+            LogCrash("AppDomain.UnhandledException", e.ExceptionObject as Exception);
+        TaskScheduler.UnobservedTaskException += (s, e) =>
+        {
+            LogCrash("TaskScheduler.UnobservedTaskException", e.Exception);
+            e.SetObserved();
+        };
+
         var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder();
         ConfigureServices(builder.Services);
         Host = builder.Build();
+    }
+
+    private static void LogCrash(string source, Exception? ex)
+    {
+        try
+        {
+            File.AppendAllText(CrashLogPath,
+                $"[{DateTimeOffset.Now:O}] {source}{Environment.NewLine}{ex}{Environment.NewLine}{Environment.NewLine}");
+        }
+        catch { /* never let logging throw */ }
     }
 
     private static void ConfigureServices(IServiceCollection services)
